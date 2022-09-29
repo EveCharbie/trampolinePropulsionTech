@@ -99,59 +99,135 @@ def q_cheville_func(Q):
     fun = cas.Function("q_cheville", [Q], [q_out])
     return fun
 
+def tau_actuator_constraints_min(pn: PenaltyNode, path_model_cheville: str, minimal_tau: float = None) -> cas.MX:
+    nq = int(pn.nlp.states.shape / 2)
 
-def tau_actuator_constraints(pn: PenaltyNode, path_model_cheville: str, minimal_tau: float = None) -> cas.MX:
-    model_cheville = biorbd.Model(path_model_cheville)
-
-    nq = int(pn.nlp.states.shape /2)
-
-    tau = pn.nlp.variable_mappings["tau"].to_second.map(pn.nlp.controls["tau"].mx)
-    q = pn.nlp.variable_mappings["q"].to_second.map(pn.nlp.states["q"].mx)
-    qdot = pn.nlp.variable_mappings['qdot'].to_second.map(pn.nlp.states['qdot'].mx)
-
-    #q = [pn.nlp.variable_mappings["q"].to_second.map(mx[:nq]) for mx in pn.x]
-    #q_dot = [pn.nlp.variable_mappings["qdot"].to_second.map(mx[nq:]) for mx in pn.x]
-
-    q_cheville = cas.MX.sym("q_cheville", 1)
-    q_dot_cheville = cas.MX.sym("q_dot_cheville", 1)
+    q_mx = pn.nlp.states["q"].mx
+    qdot_mx = pn.nlp.states["qdot"].mx
+    tau_mx = pn.nlp.controls["tau"].mx
 
     min_bound = []
-    max_bound = []
-    obj = []
-
-    #func = biorbd.to_casadi_func("torqueMax", pn.nlp.model.torqueMax, pn.nlp.variable_mappings['q'].to_second.map(pn.nlp.states['q'].mx), pn.nlp.variable_mappings['qdot'].to_second.map(pn.nlp.states['qdot'].mx))
-    #func_cheville = biorbd.to_casadi_func("torqueMax_cheville", model_cheville.torqueMax, q_cheville, q_dot_cheville)
-    #func = BiorbdInterface.mx_to_cx("torqueMax", pn.nlp.model.torqueMax, q, qdot)
-    #func_cheville = BiorbdInterface.mx_to_cx("torqueMax_cheville", model_cheville.torqueMax, q_cheville, q_dot_cheville)
-    func = cas.Function("torqueMax", [pn.nlp.states['q'].mx, pn.nlp.states['qdot'].mx], [pn.nlp.model.torqueMax])(pn.nlp.states['q'].cx, pn.nlp.states['qdot'].cx)
-    func_cheville = cas.Function("torqueMax_cheville", [pn.nlp.states['q'].mx, pn.nlp.states['qdot'].mx], [model_cheville.torqueMax])(pn.nlp.states['q'].cx, pn.nlp.states['qdot'].cx)
-
-
-    func_q_cheville = q_cheville_func(q_cheville)
-
-    bound = func(q, qdot)
-    bound_cheville = func_cheville(func_q_cheville(q[2]), -qdot[2])
-
-    min_boundz = cas.if_else(bound[2:nq, 1] < minimal_tau, minimal_tau, bound[2:nq, 1])
+    bound = pn.nlp.model.torqueMax(q_mx, qdot_mx)[1].to_mx()
+    min_boundz = cas.if_else(bound[2:nq] < minimal_tau, minimal_tau, bound[2:nq])
     min_boundz[0, 0] = 0
-    # min_boundz[3, :] = cas.if_else(bound[5, 1] < minimal_tau, minimal_tau, bound[5, 1])
     min_bound.append(min_boundz)
-    max_boundz = cas.if_else(bound[2:nq, 0] < minimal_tau, minimal_tau, bound[2:nq, 0])
-    max_boundz[0, 0] = cas.if_else(bound_cheville[:, 0] < minimal_tau, minimal_tau, bound_cheville[:, 0])
-    # max_boundz[3, :] = cas.if_else(bound[5, 0] < minimal_tau, minimal_tau, bound[5, 0])
-    max_bound.append(max_boundz)
-    obj.append(tau[2:])
+    min_bound[0] = cas.vertcat(np.ones((2,)) * -100000, min_bound[0])
 
+    obj = []
+    obj.append(tau_mx)
     obj_star = cas.vertcat(*obj)
     min_bound = cas.vertcat(*min_bound)
+
+    constraint_min = BiorbdInterface.mx_to_cx("tau_actuator_constraints_min", obj_star - min_bound, pn.nlp.states["q"], pn.nlp.states["qdot"], pn.nlp.controls["tau"])
+
+    # q_mx = pn.nlp.variable_mappings["q"].to_second.map(pn.nlp.states["q"].mx)
+    # qdot_mx = pn.nlp.variable_mappings['qdot'].to_second.map(pn.nlp.states['qdot'].mx)
+    # tau_mx = pn.nlp.variable_mappings["tau"].to_second.map(pn.nlp.controls["tau"].mx)
+    # q_cx = pn.nlp.variable_mappings["q"].to_second.map(pn.nlp.states["q"].cx)
+    # qdot_cx = pn.nlp.variable_mappings['qdot'].to_second.map(pn.nlp.states['qdot'].cx)
+    # tau_cx = pn.nlp.variable_mappings["tau"].to_second.map(pn.nlp.controls["tau"].cx)
+    #
+    # # bound = cas.Function("torqueMax", [q_mx, qdot_mx], [pn.nlp.model.torqueMax(q_mx, qdot_mx)[1].to_mx()])(q_mx, qdot_mx)
+    # # func_cheville = cas.Function("torqueMax_cheville", [pn.nlp.states['q'].mx, pn.nlp.states['qdot'].mx],
+    # #                               [model_cheville.torqueMax(pn.nlp.states['q'].mx, pn.nlp.states['qdot'].mx)[1].to_mx()])(pn.nlp.states['q'].cx, pn.nlp.states['qdot'].cx)
+    #
+    # # func_q_cheville = q_cheville_func(q_cheville)
+    # # bound_cheville = func_cheville(func_q_cheville(q[2]), -qdot[2])
+    #
+    # # min_boundz = cas.if_else(bound[2:nq] < minimal_tau, minimal_tau, bound[2:nq])
+    # # min_boundz[0, 0] = 0
+    # # # min_boundz[3, :] = cas.if_else(bound[5, 1] < minimal_tau, minimal_tau, bound[5, 1])
+    # # min_bound.append(min_boundz)
+    # # min_bound[0] = cas.vertcat(np.ones((2, )) * -np.inf, min_bound[0])
+    # obj.append(tau_mx)
+    #
+    # obj_star = cas.vertcat(*obj)
+    # min_bound = cas.vertcat(*min_bound)
+    #
+    # # return (
+    # #     cas.vertcat(np.zeros(min_bound.shape), np.ones(max_bound.shape) * -np.inf),
+    # #     cas.vertcat(obj_star + min_bound, obj_star - max_bound),
+    # #     cas.vertcat(np.ones(min_bound.shape) * np.inf, np.zeros(max_bound.shape)),
+    # # )
+    #
+    # func_constraint = cas.Function('tau_actuator_constraints_min', [q_mx, qdot_mx], [obj_star])(q_cx, qdot_cx)
+
+
+    return constraint_min
+
+
+def tau_actuator_constraints_max(pn: PenaltyNode, path_model_cheville: str, minimal_tau: float = None) -> cas.MX:
+    model_cheville = biorbd.Model(path_model_cheville)
+    q_cheville = cas.MX.sym("q_cheville", 1)
+    qdot_cheville = cas.MX.sym("q_dot_cheville", 1)
+
+    nq = int(pn.nlp.states.shape / 2)
+
+    q_mx = pn.nlp.states["q"].mx
+    qdot_mx = pn.nlp.states["qdot"].mx
+    tau_mx = pn.nlp.controls["tau"].mx
+
+    # func_cheville = model_cheville.torqueMax(q_cheville, qdot_cheville)
+    # func_q_cheville = q_cheville_func(q_cheville)
+    # bound_cheville = func_cheville(func_q_cheville(q_mx[2]), -qdot_mx[2])
+
+    max_bound = []
+    bound = pn.nlp.model.torqueMax(q_mx, qdot_mx)[1].to_mx()
+    max_boundz = cas.if_else(bound[2:nq] < minimal_tau, minimal_tau, bound[2:nq])
+    max_boundz[0, 0] = 0 #cas.if_else(bound_cheville[:, 0] < minimal_tau, minimal_tau,bound_cheville[:, 0])
+    max_bound.append(max_boundz)
+    max_bound[0] = cas.vertcat(np.ones((2,)) * 100000, max_bound[0])
+
+    obj = []
+    obj.append(tau_mx)
+    obj_star = cas.vertcat(*obj)
     max_bound = cas.vertcat(*max_bound)
 
-    return (
-        cas.vertcat(np.zeros(min_bound.shape), np.ones(max_bound.shape) * -np.inf),
-        cas.vertcat(obj_star + min_bound, obj_star - max_bound),
-        cas.vertcat(np.ones(min_bound.shape) * np.inf, np.zeros(max_bound.shape)),
-    )
+    constraint_max = BiorbdInterface.mx_to_cx("tau_actuator_constraints_max", obj_star - max_bound, pn.nlp.states["q"],
+                                              pn.nlp.states["qdot"], pn.nlp.controls["tau"])
+    return constraint_max
 
+
+# def tau_actuator_constraints_max(pn: PenaltyNode, path_model_cheville: str, minimal_tau: float = None) -> cas.MX:
+#     model_cheville = biorbd.Model(path_model_cheville)
+#
+#     nq = int(pn.nlp.states.shape /2)
+#
+#     tau = pn.nlp.variable_mappings["tau"].to_second.map(pn.nlp.controls["tau"].mx)
+#     q = pn.nlp.variable_mappings["q"].to_second.map(pn.nlp.states["q"].mx)
+#     qdot = pn.nlp.variable_mappings['qdot'].to_second.map(pn.nlp.states['qdot'].mx)
+#
+#     q_cheville = cas.MX.sym("q_cheville", 1)
+#     q_dot_cheville = cas.MX.sym("q_dot_cheville", 1)
+#
+#     min_bound = []
+#     max_bound = []
+#     obj = []
+#
+#     bound = cas.Function("torqueMax", [pn.nlp.states['q'].mx, pn.nlp.states['qdot'].mx],
+#                          [pn.nlp.model.torqueMax(pn.nlp.states['q'].mx, pn.nlp.states['qdot'].mx)[0].to_mx()])(pn.nlp.states['q'].cx, pn.nlp.states['qdot'].cx)
+#     bound_cheville = cas.Function("torqueMax_cheville", [pn.nlp.states['q'].mx, pn.nlp.states['qdot'].mx],
+#                                   [model_cheville.torqueMax(pn.nlp.states['q'].mx, pn.nlp.states['qdot'].mx)[0].to_mx()])(pn.nlp.states['q'].cx, pn.nlp.states['qdot'].cx)
+#
+#
+#     func_q_cheville = q_cheville_func(q_cheville)
+#     # bound_cheville = func_cheville(func_q_cheville(q[2]), -qdot[2])
+#
+#     max_boundz = cas.if_else(bound[2:nq] < minimal_tau, minimal_tau, bound[2:nq])
+#     max_boundz[0, 0] = 0
+#     # max_boundz[3, :] = cas.if_else(bound[5, 0] < minimal_tau, minimal_tau, bound[5, 0])
+#     max_bound.append(max_boundz)
+#     obj.append(tau[2:])
+#
+#     obj_star = cas.vertcat(*obj)
+#     max_bound = cas.vertcat(*max_bound)
+#
+#     # return (
+#     #     cas.vertcat(np.zeros(min_bound.shape), np.ones(max_bound.shape) * -np.inf),
+#     #     cas.vertcat(obj_star + min_bound, obj_star - max_bound),
+#     #     cas.vertcat(np.ones(min_bound.shape) * np.inf, np.zeros(max_bound.shape)),
+#     # )
+#     return cas.vertcat((max_bound - obj_star) >= 0)
 
 
 def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, weight, Salto1, Salto2):
@@ -285,24 +361,43 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
         max_bound=0,
         phase=4,
     )
-
+    #contraintes sur le min
     constraints.add(
-        tau_actuator_constraints, phase=0, node=Node.ALL, minimal_tau=20, path_model_cheville=path_model_cheville
+        tau_actuator_constraints_min, phase=0, node=Node.ALL, minimal_tau=20, path_model_cheville=path_model_cheville, min_bound=0, max_bound=np.inf
     )
     constraints.add(
-        tau_actuator_constraints, phase=1, node=Node.ALL, minimal_tau=20, path_model_cheville=path_model_cheville
+        tau_actuator_constraints_min, phase=1, node=Node.ALL, minimal_tau=20, path_model_cheville=path_model_cheville, min_bound=0, max_bound=np.inf
     )
     constraints.add(
-        tau_actuator_constraints, phase=2, node=Node.ALL, minimal_tau=20, path_model_cheville=path_model_cheville
+        tau_actuator_constraints_min, phase=2, node=Node.ALL, minimal_tau=20, path_model_cheville=path_model_cheville, min_bound=0, max_bound=np.inf
     )
     constraints.add(
-        tau_actuator_constraints, phase=3, node=Node.ALL, minimal_tau=20, path_model_cheville=path_model_cheville
+        tau_actuator_constraints_min, phase=3, node=Node.ALL, minimal_tau=20, path_model_cheville=path_model_cheville, min_bound=0, max_bound=np.inf
     )
     constraints.add(
-        tau_actuator_constraints, phase=4, node=Node.ALL, minimal_tau=20, path_model_cheville=path_model_cheville
+        tau_actuator_constraints_min, phase=4, node=Node.ALL, minimal_tau=20, path_model_cheville=path_model_cheville, min_bound=0, max_bound=np.inf
     )
     constraints.add(
-        tau_actuator_constraints, phase=5, node=Node.ALL, minimal_tau=20, path_model_cheville=path_model_cheville
+        tau_actuator_constraints_min, phase=5, node=Node.ALL, minimal_tau=20, path_model_cheville=path_model_cheville, min_bound=0, max_bound=np.inf
+    )
+    #contraintes sur le max
+    constraints.add(
+        tau_actuator_constraints_max, phase=0, node=Node.ALL, minimal_tau=20, path_model_cheville=path_model_cheville, min_bound=-np.inf, max_bound=0
+    )
+    constraints.add(
+        tau_actuator_constraints_max, phase=1, node=Node.ALL, minimal_tau=20, path_model_cheville=path_model_cheville, min_bound=-np.inf, max_bound=0
+    )
+    constraints.add(
+        tau_actuator_constraints_max, phase=2, node=Node.ALL, minimal_tau=20, path_model_cheville=path_model_cheville, min_bound=-np.inf, max_bound=0
+    )
+    constraints.add(
+        tau_actuator_constraints_max, phase=3, node=Node.ALL, minimal_tau=20, path_model_cheville=path_model_cheville, min_bound=-np.inf, max_bound=0
+    )
+    constraints.add(
+        tau_actuator_constraints_max, phase=4, node=Node.ALL, minimal_tau=20, path_model_cheville=path_model_cheville, min_bound=-np.inf, max_bound=0
+    )
+    constraints.add(
+        tau_actuator_constraints_max, phase=5, node=Node.ALL, minimal_tau=20, path_model_cheville=path_model_cheville, min_bound=-np.inf, max_bound=0
     )
 
     # constraints.add(ConstraintFcn.TORQUE_MAX_FROM_Q_AND_QDOT, phase=0, node=Node.ALL, min_torque=20)#, path_model_cheville=path_model_cheville)
