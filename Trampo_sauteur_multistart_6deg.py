@@ -293,13 +293,13 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
     objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_COM_POSITION, weight=-weight, phase=5, quadratic=False, axes=Axis.Z)
 
     objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", weight=1, phase=0)
-    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", derivative=True, weight=1, phase=0)
+    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", derivative=True, weight=1000, phase=0)
     objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", weight=1, phase=1)
-    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", derivative=True, weight=1, phase=1)
+    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", derivative=True, weight=1000, phase=1)
     objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", weight=1, phase=3)
-    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", derivative=True, weight=1, phase=3)
+    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", derivative=True, weight=1000, phase=3)
     objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", weight=1, phase=4)
-    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", derivative=True, weight=1, phase=4)
+    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", derivative=True, weight=1000, phase=4)
 
     objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE, key="q", node=Node.END, index=2, weight=1000, phase=2, target=np.ones((1, 1)) * 2 * np.pi * Salto1,)
     objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE, key="q", node=Node.END, index=2, weight=1000, phase=5, target=np.ones((1, 1)) * (2 * np.pi * Salto1 + 2 * np.pi * Salto2),)
@@ -416,14 +416,20 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
     X_bounds = BoundsList()
 
     X_bounds.add(bounds=QAndQDotBounds(biorbd_model[0]))
-    X_bounds[0].min[:, 0] = [0, 0, -0.4323, 1.4415, -1.5564, 1.02, -10, -30, -1, -1, -1, -1]
-    X_bounds[0].max[:, 0] = [0, 0, -0.4323, 1.4415, -1.5564, 1.02, 10, 3, 1, 1, 1, 1]
+    X_bounds[0].min[:1, 1:] = [-0.3]
+    X_bounds[0].max[:1, 1:] = [0.3]
+
+    X_bounds[0].min[:, 0] = [-0.3, 0, -0.4323, 1.4415, -1.5564, 1.02, -10, -30, -1, -1, -1, -1]
+    X_bounds[0].max[:, 0] = [0.3, 0, -0.4323, 1.4415, -1.5564, 1.02, 10, 3, 1, 1, 1, 1]
     X_bounds[0].min[1:3, 1] = [-1.2, -0.5]
     X_bounds[0].max[1:3, 1] = [0, 0.5]
     X_bounds[0].min[1:3, 2] = [-1.2, -0.5]
     X_bounds[0].max[1:3, 2] = [0, 0.5]
 
     X_bounds.add(bounds=QAndQDotBounds(biorbd_model[1]))
+    X_bounds[1].min[:1, 1:] = [-0.3]
+    X_bounds[1].max[:1, 1:] = [0.3]
+
     X_bounds[1].min[:3, 0] = [-0.5, -1.2, -0.5]
     X_bounds[1].max[:3, 0] = [0.5, 0, 0.5]
     X_bounds[1].min[1:3, 1] = [-1.2, -0.5]
@@ -440,6 +446,9 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
     X_bounds[2].max[:3, 2] = [0.5, 0.5, Salto1 * 2 * np.pi + 0.5]  # 0.05
 
     X_bounds.add(bounds=QAndQDotBounds(biorbd_model[3]))
+    X_bounds[3].min[:1, 1:] = [-0.3]
+    X_bounds[3].max[:1, 1:] = [0.3]
+
     X_bounds[3].min[:3, 0] = [-0.5, -0.5, Salto1 * 2 * np.pi - 0.5]
     X_bounds[3].max[:3, 0] = [0.5, 0.5, Salto1 * 2 * np.pi + 0.5]
     X_bounds[3].min[1:3, 1] = [-1.2, Salto1 * 2 * np.pi - 0.5]
@@ -448,6 +457,9 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
     X_bounds[3].max[1:3, 2] = [0, Salto1 * 2 * np.pi + 0.5]
 
     X_bounds.add(bounds=QAndQDotBounds(biorbd_model[4]))
+    X_bounds[4].min[:1, 1:] = [-0.3]
+    X_bounds[4].max[:1, 1:] = [0.3]
+
     X_bounds[4].min[:3, 0] = [-0.5, -1.2, Salto1 * 2 * np.pi - 0.5]
     X_bounds[4].max[:3, 0] = [0.5, 0, Salto1 * 2 * np.pi + 0.5]
     X_bounds[4].min[1:3, 1] = [-1.2, Salto1 * 2 * np.pi - 0.5]
@@ -605,8 +617,8 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
     x_init[3].init[1, :] = np.linspace(-0.1, -1, 51)
     x_init[4].init[1, :] = np.linspace(-1, -0.1, 51)
     #interpol lineaire sur qjambe_rotx
-    x_init[2].init[2, :] = np.linspace((np.linspace(0, 2*np.pi, 51)))
-    x_init[5].init[2, :] = np.linspace((np.linspace(2*np.pi, 4*np.pi, 51)))
+    x_init[2].init[2, :] = (np.linspace(0, (2*np.pi), 51))
+    x_init[5].init[2, :] = (np.linspace((2*np.pi), (4*np.pi), 51))
 
     # u_init.add([tau_init] * biorbd_model[0].nbGeneralizedTorque())
     # u_init.add([tau_init] * biorbd_model[0].nbGeneralizedTorque())
