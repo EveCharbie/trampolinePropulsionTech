@@ -100,16 +100,25 @@ def q_cheville_func(Q):
     return fun
 
 def tau_actuator_constraints_min(pn: PenaltyNode, path_model_cheville: str, minimal_tau: float = None) -> cas.MX:
+    model_cheville = biorbd.Model(path_model_cheville)
+    q_cheville = cas.MX.sym("q_cheville", 1)
+    qdot_cheville = cas.MX.sym("q_dot_cheville", 1)
+
     nq = int(pn.nlp.states.shape / 2)
 
     q_mx = pn.nlp.states["q"].mx
     qdot_mx = pn.nlp.states["qdot"].mx
     tau_mx = pn.nlp.controls["tau"].mx
+    func_cheville = cas.Function("torqueMax_cheville", [q_cheville, qdot_cheville],
+                                 [model_cheville.torqueMax(q_cheville, qdot_cheville)[1].to_mx()])
+
+    func_q_cheville = q_cheville_func(q_cheville)
+    bound_cheville = func_cheville(func_q_cheville(q_mx[2]), -qdot_mx[2])
 
     min_bound = []
     bound = pn.nlp.model.torqueMax(q_mx, qdot_mx)[1].to_mx()
     min_boundz = cas.if_else(bound[2:nq] < minimal_tau, minimal_tau, bound[2:nq])
-    min_boundz[0, 0] = 0
+    min_boundz[0, 0] = cas.if_else(bound_cheville[:, 0] < minimal_tau, minimal_tau,bound_cheville[:, 0])
     min_bound.append(min_boundz)
     min_bound[0] = cas.vertcat(np.ones((2,)) * -100000, min_bound[0])
 
@@ -166,15 +175,18 @@ def tau_actuator_constraints_max(pn: PenaltyNode, path_model_cheville: str, mini
     q_mx = pn.nlp.states["q"].mx
     qdot_mx = pn.nlp.states["qdot"].mx
     tau_mx = pn.nlp.controls["tau"].mx
+    func_cheville = cas.Function("torqueMax_cheville", [q_cheville, qdot_cheville],
+                                 [model_cheville.torqueMax(q_cheville, qdot_cheville)[0].to_mx()])
 
-    # func_cheville = model_cheville.torqueMax(q_cheville, qdot_cheville)
-    # func_q_cheville = q_cheville_func(q_cheville)
-    # bound_cheville = func_cheville(func_q_cheville(q_mx[2]), -qdot_mx[2])
+    #func_cheville = cas.function(model_cheville.torqueMax(q_cheville, qdot_cheville)[0].to_mx()
+
+    func_q_cheville = q_cheville_func(q_cheville)
+    bound_cheville = func_cheville(func_q_cheville(q_mx[2]), -qdot_mx[2])
 
     max_bound = []
-    bound = pn.nlp.model.torqueMax(q_mx, qdot_mx)[1].to_mx()
+    bound = pn.nlp.model.torqueMax(q_mx, qdot_mx)[0].to_mx()
     max_boundz = cas.if_else(bound[2:nq] < minimal_tau, minimal_tau, bound[2:nq])
-    max_boundz[0, 0] = 0 #cas.if_else(bound_cheville[:, 0] < minimal_tau, minimal_tau,bound_cheville[:, 0])
+    max_boundz[0, 0] = cas.if_else(bound_cheville[:, 0] < minimal_tau, minimal_tau,bound_cheville[:, 0])
     max_bound.append(max_boundz)
     max_bound[0] = cas.vertcat(np.ones((2,)) * 100000, max_bound[0])
 
@@ -400,14 +412,6 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
         tau_actuator_constraints_max, phase=5, node=Node.ALL, minimal_tau=20, path_model_cheville=path_model_cheville, min_bound=-np.inf, max_bound=0
     )
 
-    # constraints.add(ConstraintFcn.TORQUE_MAX_FROM_Q_AND_QDOT, phase=0, node=Node.ALL, min_torque=20)#, path_model_cheville=path_model_cheville)
-    # constraints.add(ConstraintFcn.TORQUE_MAX_FROM_Q_AND_QDOT, phase=1, node=Node.ALL, min_torque=20)#, path_model_cheville=path_model_cheville)
-    # constraints.add(ConstraintFcn.TORQUE_MAX_FROM_Q_AND_QDOT, phase=2, node=Node.ALL, min_torque=20)#, path_model_cheville=path_model_cheville)
-    # constraints.add(ConstraintFcn.TORQUE_MAX_FROM_Q_AND_QDOT, phase=3, node=Node.ALL, min_torque=20)#, path_model_cheville=path_model_cheville)
-    # constraints.add(ConstraintFcn.TORQUE_MAX_FROM_Q_AND_QDOT, phase=4, node=Node.ALL, min_torque=20)#, path_model_cheville=path_model_cheville)
-    # constraints.add(ConstraintFcn.TORQUE_MAX_FROM_Q_AND_QDOT, phase=5, node=Node.ALL, min_torque=20)#, path_model_cheville=path_model_cheville)
-    # constraints.add(ConstraintFcn., node=Node.END)
-
     # Path constraint
     X_bounds = BoundsList()
 
@@ -486,9 +490,6 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
 
     # Initial guess
     x_init = InitialGuessList()
-    # x_init.add(
-    #     np.random.random((biorbd_model[0].nbQ() + biorbd_model[0].nbQdot(),
-    #                       number_shooting_points[0] + 1)) - 0.5,interpolation = InterpolationType.EACH_FRAME,)
     x_init.add(NoisedInitialGuess(
             [0] * 12, # (nq + nqdot)
             bounds=X_bounds[0],
@@ -498,9 +499,6 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
             seed=i_rand,
         )
     )
-    # x_init.add(
-    #     np.random.random((biorbd_model[0].nbQ() + biorbd_model[0].nbQdot(),
-    #                       number_shooting_points[0] + 1)) - 0.5,interpolation = InterpolationType.EACH_FRAME,)
     x_init.add(NoisedInitialGuess(
             [0] * 12, # (nq + nqdot)
             bounds=X_bounds[1],
@@ -510,9 +508,6 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
             seed=i_rand,
         )
     )
-    # x_init.add(
-    #     np.random.random((biorbd_model[0].nbQ() + biorbd_model[0].nbQdot(),
-    #                       number_shooting_points[0] + 1)) - 0.5,interpolation = InterpolationType.EACH_FRAME,)
     x_init.add(NoisedInitialGuess(
             [0] * 12, # (nq + nqdot)
             bounds=X_bounds[2],
@@ -522,9 +517,6 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
             seed=i_rand,
         )
     )
-    # x_init.add(
-    #     np.random.random((biorbd_model[0].nbQ() + biorbd_model[0].nbQdot(),
-    #                       number_shooting_points[0] + 1)) - 0.5,interpolation = InterpolationType.EACH_FRAME,)
     x_init.add(NoisedInitialGuess(
             [0] * 12, # (nq + nqdot)
             bounds=X_bounds[3],
@@ -534,9 +526,6 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
             seed=i_rand,
         )
     )
-    # x_init.add(
-    #     np.random.random((biorbd_model[0].nbQ() + biorbd_model[0].nbQdot(),
-    #                       number_shooting_points[0] + 1)) - 0.5,interpolation = InterpolationType.EACH_FRAME,)
     x_init.add(NoisedInitialGuess(
             [0] * 12, # (nq + nqdot)
             bounds=X_bounds[4],
@@ -546,9 +535,6 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
             seed=i_rand,
         )
     )
-    x_init.add(
-        np.random.random((biorbd_model[0].nbQ() + biorbd_model[0].nbQdot(),
-                          number_shooting_points[0] + 1)) - 0.5,interpolation = InterpolationType.EACH_FRAME,)
     x_init.add(NoisedInitialGuess(
             [0] * 12, # (nq + nqdot)
             bounds=X_bounds[5],
@@ -616,10 +602,11 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
 
     x_init[0].init[1, :] = np.linspace(-0.1, -1, 51)
     x_init[1].init[1, :] = np.linspace(-1, -0.1, 51)
-    # x_init[2].init[1, :] = np.hstack((np.linspace(0.1, 4, 26), np.linspace(4, 0.1, 25)))
     x_init[3].init[1, :] = np.linspace(-0.1, -1, 51)
     x_init[4].init[1, :] = np.linspace(-1, -0.1, 51)
-    # x_init[5].init[1, :] = np.hstack((np.linspace(0.1, 4, 26), np.linspace(4, 0.1, 25)))
+    #interpol lineaire sur qjambe_rotx
+    x_init[2].init[2, :] = np.linspace((np.linspace(0, 2*np.pi, 51)))
+    x_init[5].init[2, :] = np.linspace((np.linspace(2*np.pi, 4*np.pi, 51)))
 
     # u_init.add([tau_init] * biorbd_model[0].nbGeneralizedTorque())
     # u_init.add([tau_init] * biorbd_model[0].nbGeneralizedTorque())
