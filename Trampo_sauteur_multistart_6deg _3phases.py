@@ -1,3 +1,9 @@
+"""Contact entre sauteur et trampoline, en considérant seulement 6 degrés de liberté
+    on se limite ici au 3 premiere phase : l'enfoncement du sauteur dans la toile,
+                                            la phase de propulsion du sauteur pendant laquelle la toile restitue l'énergie
+                                            le phase dans les airs avec réalisation d'un salto
+"""
+
 from time import time
 import numpy as np
 import casadi as cas
@@ -209,7 +215,7 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
     objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", weight=1, phase=1)
     objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", derivative=True, weight=1000, phase=1)
 
-    objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE, key="q", node=Node.END, index=2, weight=1000, phase=2, target=np.ones((1, 1)) * 2 * np.pi * Salto1,)
+    objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE, key="q", node=Node.END, index=2, weight=1000, phase=2, target=np.ones((1, 1)) * 2 * np.pi * Salto1)
 
     # arriver avec les pieds au centre de la toile
     objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE,key="q", phase=0, node=Node.START, index=0, weight=100, target=np.zeros((1, 1)))
@@ -225,7 +231,6 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
     dynamics.add(DynamicsFcn.TORQUE_DRIVEN)
     dynamics.add(DynamicsFcn.TORQUE_DRIVEN)
 
-
     # --- Constraints --- #
     constraints = ConstraintList()
 
@@ -233,7 +238,6 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
     constraints.add(ConstraintFcn.TIME_CONSTRAINT, node=Node.END, min_bound=0.2, max_bound=3, phase=0)
     constraints.add(ConstraintFcn.TIME_CONSTRAINT, node=Node.END, min_bound=0.2, max_bound=3, phase=1)
     constraints.add(ConstraintFcn.TIME_CONSTRAINT, node=Node.END, min_bound=0.2, max_bound=3, phase=2)
-
 
     constraints.add(
         custom_spring_const,
@@ -462,7 +466,7 @@ if __name__ == "__main__":
 
 #
         solver = Solver.IPOPT(show_online_optim=True, show_options=dict(show_bounds=True))
-        solver.set_maximum_iterations(100000)
+        solver.set_maximum_iterations(10)
         solver.set_linear_solver("ma57")
         sol = ocp.solve(solver)
 
@@ -477,32 +481,6 @@ if __name__ == "__main__":
             q = np.hstack((q, ocp.nlp[i].variable_mappings["q"].to_second.map(sol.states[i]["q"])))
             qdot = np.hstack((qdot, ocp.nlp[i].variable_mappings["qdot"].to_second.map(sol.states[i]["qdot"])))
             u = np.hstack((u, ocp.nlp[i].variable_mappings["q"].to_second.map(sol.controls[i]["tau"])))
-
-        # if sol.status == 0:
-        #     f = open(f"Historique_{Date}.txt", "a+")
-        #     f.write(f"Success \n")
-        #     f.close()
-        #     np.save(
-        #         f"Results_MultiStart_Sauteur/Q_Salto1{Salto1}_Salto2{Salto2}_DoF6_weight{weight}_random{i_rand}",
-        #         q,
-        #     )
-        #     np.save(
-        #         f"Results_MultiStart_Sauteur/Qdot_Salto1{Salto1}_Salto2{Salto2}_DoF6_weight{weight}_random{i_rand}",
-        #         qdot,
-        #     )
-        #     np.save(
-        #         f"Results_MultiStart_Sauteur/U_Salto1{Salto1}_Salto2{Salto2}_DoF6_weight{weight}_random{i_rand}",
-        #         u,
-        #     )
-        #     np.save(
-        #         f"Results_MultiStart_Sauteur/T_Salto1{Salto1}_Salto2{Salto2}_DoF6_weight{weight}_random{i_rand}",
-        #         t,
-        #     )
-        #
-        # else:
-        #     f = open(f"Historique_{Date}.txt", "a+")
-        #     f.write(f"Fail \n")
-        #     f.close()
 
 #####################################################################################################################
     import bioviz
@@ -523,22 +501,11 @@ if __name__ == "__main__":
         Marker_pied[:, j] = np.reshape(Marker_pied_tempo, (3))
         Force_toile[:, j] = np.reshape(Force_toile_tempo, (3))
 
-    # fig, axs = plt.subplots(1, 3)
-    # axs = axs.ravel()
-    # for iplt in range(3):
-    #     axs[iplt].plot(Force_toile[iplt, :], '-k', label='Force')
-    #     axs[iplt].legend()
-    # axs[0].set_xlabel('x')
-    # axs[0].set_xlabel('y')
-    # axs[0].set_xlabel('z')
-    # plt.show()
-
     plt.figure()
     plt.plot(Force_toile[0, :], "-r", label="Force x")
     plt.plot(Force_toile[1, :], "-g", label="Force y")
     plt.plot(Force_toile[2, :], "-b", label="Force z")
     plt.legend()
-    # plt.show()
 
     fig, axs = plt.subplots(2, 3)
     axs = axs.ravel()
@@ -553,7 +520,6 @@ if __name__ == "__main__":
         axs[iplt].plot(np.array([250, 250]), np.array([-10, 10]), "--k")
         axs[iplt].set_xlabel(biorbd.Model(model_path).nameDof()[iplt].to_string())
         axs[iplt].legend()
-    # plt.show()
 
     fig, axs = plt.subplots(1, 2)
     axs = axs.ravel()
