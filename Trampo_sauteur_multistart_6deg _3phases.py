@@ -126,14 +126,14 @@ def tau_actuator_constraints_min(pn: PenaltyNode, path_model_cheville: str, mini
     min_boundz = cas.if_else(bound[2:nq] < minimal_tau, minimal_tau, bound[2:nq])
     min_boundz[0, 0] = cas.if_else(bound_cheville[:, 0] < minimal_tau, minimal_tau,bound_cheville[:, 0])
     min_bound.append(min_boundz)
-    min_bound[0] = cas.vertcat(np.ones((2,)) * -100000, min_bound[0])
+    min_bound[0] = cas.vertcat(np.ones((2,)) * -1000000, min_bound[0])
 
     obj = []
     obj.append(tau_mx)
     obj_star = cas.vertcat(*obj)
     min_bound = cas.vertcat(*min_bound)
 
-    constraint_min = BiorbdInterface.mx_to_cx("tau_actuator_constraints_min", obj_star - min_bound, pn.nlp.states["q"], pn.nlp.states["qdot"], pn.nlp.controls["tau"])
+    constraint_min = BiorbdInterface.mx_to_cx("tau_actuator_constraints_min", obj_star - min_bound , pn.nlp.states["q"], pn.nlp.states["qdot"], pn.nlp.controls["tau"])
 
     return constraint_min
 
@@ -157,9 +157,9 @@ def tau_actuator_constraints_max(pn: PenaltyNode, path_model_cheville: str, mini
     max_bound = []
     bound = pn.nlp.model.torqueMax(q_mx, qdot_mx)[0].to_mx()
     max_boundz = cas.if_else(bound[2:nq] < minimal_tau, minimal_tau, bound[2:nq])
-    max_boundz[0, 0] = cas.if_else(bound_cheville[:, 0] < minimal_tau, minimal_tau,bound_cheville[:, 0])
+    max_boundz[0, 0] = 0 #cas.if_else(bound_cheville[:, 0] < minimal_tau, minimal_tau,bound_cheville[:, 0])
     max_bound.append(max_boundz)
-    max_bound[0] = cas.vertcat(np.ones((2,)) * 100000, max_bound[0])
+    max_bound[0] = cas.vertcat(np.ones((2,)) * 1000000, max_bound[0])
 
     obj = []
     obj.append(tau_mx)
@@ -199,7 +199,7 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
         1.5,
     )
 
-    tau_min, tau_max, tau_init = -1000, 1000, 0
+    tau_min, tau_max, tau_init = -10000, 10000, 0
 
     nq = biorbd_model[0].nbQ()
 
@@ -211,19 +211,19 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
     objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_COM_POSITION, weight=-weight, phase=2, quadratic=False, axes=Axis.Z)
 
     objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", weight=1, phase=0)
-    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", derivative=True, weight=1000, phase=0)
+    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", derivative=True, weight=100, phase=0)
     objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", weight=1, phase=1)
-    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", derivative=True, weight=1000, phase=1)
+    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", derivative=True, weight=100, phase=1)
 
     objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE, key="q", node=Node.END, index=2, weight=1000, phase=2, target=np.ones((1, 1)) * 2 * np.pi * Salto1)
 
     # arriver avec les pieds au centre de la toile
     objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE,key="q", phase=0, node=Node.START, index=0, weight=100, target=np.zeros((1, 1)))
-    objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE,key="q", phase=0, node=Node.START, index=1, weight=100, target=np.zeros((1, 1)))
+    objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE,key="qdot", phase=0, node=Node.START, index=1, weight=100, target=np.zeros((1, 1)))
     objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE,key="q", phase=1, node=Node.END, index=0, weight=100, target=np.zeros((1, 1)))
-    objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE,key="q", phase=1, node=Node.END, index=1, weight=100, target=np.zeros((1, 1)))
+    objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE,key="qdot", phase=1, node=Node.END, index=1, weight=100, target=np.zeros((1, 1)))
     objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE,key="q", phase=2, node=Node.END, index=0, weight=100, target=np.zeros((1, 1)))
-    objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE,key="q", phase=2, node=Node.END, index=1, weight=100, target=np.zeros((1, 1)))
+    objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE,key="qdot", phase=2, node=Node.END, index=1, weight=100, target=np.zeros((1, 1)))
 
     # # Dynamics
     dynamics = DynamicsList()
@@ -334,7 +334,7 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
     # Initial guess
     x_init = InitialGuessList()
     x_init.add(NoisedInitialGuess(
-            [0] * 12, # (nq + nqdot)
+            [0]*12, # (nq + nqdot)
             bounds=X_bounds[0],
             noise_magnitude=0.2,
             n_shooting=number_shooting_points[0],
@@ -343,7 +343,7 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
         )
     )
     x_init.add(NoisedInitialGuess(
-            [0] * 12, # (nq + nqdot)
+            [0]*12, # (nq + nqdot)
             bounds=X_bounds[1],
             noise_magnitude=0.2,
             n_shooting=number_shooting_points[1],
@@ -360,6 +360,11 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
             seed=i_rand,
         )
     )
+
+    x_init[0].init[1, :] = np.linspace(-0.1, -1, 51)
+    x_init[1].init[1, :] = np.linspace(-1, -0.1, 51)
+    #interpol lineaire sur qjambe_rotx
+    x_init[2].init[2, :] = (np.linspace(0, (2*np.pi), 51))
 
     u_init = InitialGuessList()
     u_init.add(NoisedInitialGuess(
@@ -388,11 +393,6 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
             bound_push=0.1,
             seed=i_rand,
         ))
-
-    x_init[0].init[1, :] = np.linspace(-0.1, -1, 51)
-    x_init[1].init[1, :] = np.linspace(-1, -0.1, 51)
-    #interpol lineaire sur qjambe_rotx
-    x_init[2].init[2, :] = (np.linspace(0, (2*np.pi), 51))
 
     ocp = OptimalControlProgram(
         biorbd_model,
@@ -454,7 +454,7 @@ if __name__ == "__main__":
         Salto2 = Salto_2[i_salto]
 
         weight = 10000
-        i_rand = 1
+        i_rand = 10
 
         # ----------------------------------------------- Sauteur_8 --------------------------------------------------------
         f = open(f"Historique_{Date}.txt", "a+")
@@ -466,7 +466,9 @@ if __name__ == "__main__":
 
 #
         solver = Solver.IPOPT(show_online_optim=True, show_options=dict(show_bounds=True))
-        solver.set_maximum_iterations(10)
+        solver.set_maximum_iterations(100000)
+        solver.set_tol(1e-3)
+        solver.set_constr_viol_tol(1e-3)
         solver.set_linear_solver("ma57")
         sol = ocp.solve(solver)
 
