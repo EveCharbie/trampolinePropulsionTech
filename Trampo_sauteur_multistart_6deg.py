@@ -700,6 +700,8 @@ if __name__ == "__main__":
 #
         solver = Solver.IPOPT(show_online_optim=True, show_options=dict(show_bounds=True))
         solver.set_maximum_iterations(100000)
+        solver.set_tol(1e-3)
+        solver.set_constr_viol_tol(1e-3)
         solver.set_linear_solver("ma57")
         sol = ocp.solve(solver)
 
