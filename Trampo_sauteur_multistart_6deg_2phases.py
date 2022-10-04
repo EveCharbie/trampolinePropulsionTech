@@ -215,7 +215,7 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
     objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE,key="q", phase=1, node=Node.END, index=0, weight=100, target=np.zeros((1, 1)))
     objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE,key="qdot", phase=1, node=Node.END, index=1, weight=100, target=np.zeros((1, 1)))
     #maximiser la vitesse de remonter
-    objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE, key="qdot", phase=1, index=0, weight=-1)
+    objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_COM_VELOCITY, key="qdot", phase=1,node=Node.END, index=1, weight=-1)
 
     # # Dynamics
     dynamics = DynamicsList()
@@ -249,19 +249,19 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
     )
 
     #contraintes sur le min
-    # constraints.add(
-    #     tau_actuator_constraints_min, phase=0, node=Node.ALL, minimal_tau=20, path_model_cheville=path_model_cheville, min_bound=0, max_bound=np.inf
-    # )
-    # constraints.add(
-    #     tau_actuator_constraints_min, phase=1, node=Node.ALL, minimal_tau=20, path_model_cheville=path_model_cheville, min_bound=0, max_bound=np.inf
-    # )
+    constraints.add(
+        tau_actuator_constraints_min, phase=0, node=Node.ALL, minimal_tau=20, path_model_cheville=path_model_cheville, min_bound=-np.inf, max_bound=np.inf
+    )
+    constraints.add(
+        tau_actuator_constraints_min, phase=1, node=Node.ALL, minimal_tau=20, path_model_cheville=path_model_cheville, min_bound=-np.inf, max_bound=np.inf
+    )
 
     #contraintes sur le max
     constraints.add(
-        tau_actuator_constraints_max, phase=0, node=Node.ALL, minimal_tau=20, path_model_cheville=path_model_cheville, min_bound=-np.inf, max_bound=0
+        tau_actuator_constraints_max, phase=0, node=Node.ALL, minimal_tau=20, path_model_cheville=path_model_cheville, min_bound=-np.inf, max_bound=np.inf
     )
     constraints.add(
-        tau_actuator_constraints_max, phase=1, node=Node.ALL, minimal_tau=20, path_model_cheville=path_model_cheville, min_bound=-np.inf, max_bound=0
+        tau_actuator_constraints_max, phase=1, node=Node.ALL, minimal_tau=20, path_model_cheville=path_model_cheville, min_bound=-np.inf, max_bound=np.inf
     )
 
 
@@ -410,7 +410,7 @@ if __name__ == "__main__":
     ocp = prepare_ocp_back_back(path_model_cheville=path_model_cheville,lut_verticale=lut_verticale,lut_horizontale=lut_horizontale,weight=weight,Salto1=Salto1,Salto2=Salto2,)
 
     solver = Solver.IPOPT(show_online_optim=True, show_options=dict(show_bounds=True))
-    solver.set_maximum_iterations(200)
+    solver.set_maximum_iterations(1150)
     solver.set_tol(1e-3)
     solver.set_constr_viol_tol(1e-3)
     solver.set_linear_solver("ma57")
