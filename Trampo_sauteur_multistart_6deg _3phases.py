@@ -124,7 +124,7 @@ def tau_actuator_constraints_min(pn: PenaltyNode, path_model_cheville: str, mini
     min_bound = []
     bound = pn.nlp.model.torqueMax(q_mx, qdot_mx)[1].to_mx()
     min_boundz = cas.if_else(bound[2:nq] < minimal_tau, minimal_tau, bound[2:nq])
-    min_boundz[0, 0] = cas.if_else(bound_cheville[:, 0] < minimal_tau, minimal_tau,bound_cheville[:, 0])
+    min_boundz[0, 0] = 0
     min_bound.append(min_boundz)
     min_bound[0] = cas.vertcat(np.ones((2,)) * -1000000, min_bound[0])
 
@@ -133,7 +133,7 @@ def tau_actuator_constraints_min(pn: PenaltyNode, path_model_cheville: str, mini
     obj_star = cas.vertcat(*obj)
     min_bound = cas.vertcat(*min_bound)
 
-    constraint_min = BiorbdInterface.mx_to_cx("tau_actuator_constraints_min", obj_star - min_bound , pn.nlp.states["q"], pn.nlp.states["qdot"], pn.nlp.controls["tau"])
+    constraint_min = BiorbdInterface.mx_to_cx("tau_actuator_constraints_min", min_bound- obj_star   , pn.nlp.states["q"], pn.nlp.states["qdot"], pn.nlp.controls["tau"])
 
     return constraint_min
 
@@ -157,7 +157,7 @@ def tau_actuator_constraints_max(pn: PenaltyNode, path_model_cheville: str, mini
     max_bound = []
     bound = pn.nlp.model.torqueMax(q_mx, qdot_mx)[0].to_mx()
     max_boundz = cas.if_else(bound[2:nq] < minimal_tau, minimal_tau, bound[2:nq])
-    max_boundz[0, 0] = 0 #cas.if_else(bound_cheville[:, 0] < minimal_tau, minimal_tau,bound_cheville[:, 0])
+    max_boundz[0, 0] = cas.if_else(bound_cheville[:, 0] < minimal_tau, minimal_tau,bound_cheville[:, 0])
     max_bound.append(max_boundz)
     max_bound[0] = cas.vertcat(np.ones((2,)) * 1000000, max_bound[0])
 
@@ -199,31 +199,30 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
         1.5,
     )
 
-    tau_min, tau_max, tau_init = -10000, 10000, 0
+    tau_min, tau_max, tau_init = -1000, 1000, 0
 
     nq = biorbd_model[0].nbQ()
 
-    # Add objective functions
+    ### --- Add objective functions --- ###
     objective_functions = ObjectiveList()
-    objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE,key="q", node=Node.END, index=1, weight=100, phase=0, quadratic=False)
+    objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE, key="q", node=Node.END, index=1, weight=-1, phase=0, quadratic=True) #etre le plus bas a la fin de la phase 0
+    objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_COM_VELOCITY, node=Node.END, weight=-1, phase=1, quadratic=False, axes=Axis.Z) #maximiser la vitesse au moment du decollage
+    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_COM_POSITION, weight=-weight, phase=2, quadratic=False, axes=Axis.Z) #
 
-    # objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_COM_VELOCITY, node=Node.END, weight=-100000, phase=1, quadratic=False, axis=Axis.Z)
-    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_COM_POSITION, weight=-weight, phase=2, quadratic=False, axes=Axis.Z)
-
-    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", weight=1, phase=0)
+    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", weight=1, phase=0, index=[2,3,4,5]) #
     objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", derivative=True, weight=100, phase=0)
-    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", weight=1, phase=1)
+    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", weight=1, phase=1, index=[2,3,4,5])
     objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", derivative=True, weight=100, phase=1)
 
-    objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE, key="q", node=Node.END, index=2, weight=1000, phase=2, target=np.ones((1, 1)) * 2 * np.pi * Salto1)
+    objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE, key="q", node=Node.END, index=2, weight=1000, phase=2, target=np.ones((1, 1)) * 2 * np.pi * Salto1) #rotation jambe au moment du saut
 
-    # arriver avec les pieds au centre de la toile
-    objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE,key="q", phase=0, node=Node.START, index=0, weight=100, target=np.zeros((1, 1)))
-    objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE,key="qdot", phase=0, node=Node.START, index=1, weight=100, target=np.zeros((1, 1)))
-    objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE,key="q", phase=1, node=Node.END, index=0, weight=100, target=np.zeros((1, 1)))
-    objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE,key="qdot", phase=1, node=Node.END, index=1, weight=100, target=np.zeros((1, 1)))
-    objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE,key="q", phase=2, node=Node.END, index=0, weight=100, target=np.zeros((1, 1)))
-    objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE,key="qdot", phase=2, node=Node.END, index=1, weight=100, target=np.zeros((1, 1)))
+    # --- arriver avec les pieds au centre de la toile --- #
+    objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE, key="q", phase=0, node=Node.START, index=0, weight=100, target=np.zeros((1, 1))) #position en y nulle au depart
+    objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE, key="q", phase=0, node=Node.START, index=1, weight=100, target=np.zeros((1, 1))) #position en z nulle au depart
+    objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE, key="q", phase=1, node=Node.END, index=0, weight=100, target=np.zeros((1, 1))) #position en y nulle juste avant de sauter
+    objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE, key="q", phase=1, node=Node.END, index=1, weight=100, target=np.zeros((1, 1))) #position en z nulle juste avant de sauter
+    objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE, key="q", phase=2, node=Node.END, index=0, weight=100, target=np.zeros((1, 1)))
+    objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE, key="q", phase=2, node=Node.END, index=1, weight=100, target=np.zeros((1, 1)))
 
     # # Dynamics
     dynamics = DynamicsList()
@@ -235,52 +234,29 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
     constraints = ConstraintList()
 
     # Constraint arm positivity
-    constraints.add(ConstraintFcn.TIME_CONSTRAINT, node=Node.END, min_bound=0.2, max_bound=3, phase=0)
-    constraints.add(ConstraintFcn.TIME_CONSTRAINT, node=Node.END, min_bound=0.2, max_bound=3, phase=1)
+    constraints.add(ConstraintFcn.TIME_CONSTRAINT, node=Node.END, min_bound=0.1, max_bound=0.4, phase=0)
+    constraints.add(ConstraintFcn.TIME_CONSTRAINT, node=Node.END, min_bound=0.1, max_bound=0.4, phase=1)
     constraints.add(ConstraintFcn.TIME_CONSTRAINT, node=Node.END, min_bound=0.2, max_bound=3, phase=2)
 
-    constraints.add(
-        custom_spring_const,
-        lut_verticale=lut_verticale,
-        lut_horizontale=lut_horizontale,
-        node=Node.ALL,
-        min_bound=0,
-        max_bound=0,
-        phase=0,
-    )
-    constraints.add(
-        custom_spring_const,
-        lut_verticale=lut_verticale,
-        lut_horizontale=lut_horizontale,
-        node=Node.ALL,
-        min_bound=0,
-        max_bound=0,
-        phase=1,
-    )
+    #constraint spring trampo
+    constraints.add(custom_spring_const, lut_verticale=lut_verticale, lut_horizontale=lut_horizontale, node=Node.ALL, min_bound=0, max_bound=0, phase=0)
+    constraints.add(custom_spring_const, lut_verticale=lut_verticale, lut_horizontale=lut_horizontale, node=Node.ALL, min_bound=0, max_bound=0, phase=1)
 
+    #contraintes sur le couple min
+    constraints.add(
+        tau_actuator_constraints_min, phase=0, node=Node.ALL, minimal_tau=50, path_model_cheville=path_model_cheville, min_bound=-np.inf, max_bound=0, index=[2,3,4,5])
+    constraints.add(
+        tau_actuator_constraints_min, phase=1, node=Node.ALL, minimal_tau=50, path_model_cheville=path_model_cheville, min_bound=-np.inf, max_bound=0, index=[2,3,4,5])
+    constraints.add(
+        tau_actuator_constraints_min, phase=2, node=Node.ALL, minimal_tau=50, path_model_cheville=path_model_cheville, min_bound=-np.inf, max_bound=0, index=[2,3,4,5])
 
-    #contraintes sur le min
+    #contraintes sur le couple max
     constraints.add(
-        tau_actuator_constraints_min, phase=0, node=Node.ALL, minimal_tau=20, path_model_cheville=path_model_cheville, min_bound=0, max_bound=np.inf
-    )
+        tau_actuator_constraints_max, phase=0, node=Node.ALL, minimal_tau=50, path_model_cheville=path_model_cheville, min_bound=-np.inf, max_bound=0, index=[2,3,4,5])
     constraints.add(
-        tau_actuator_constraints_min, phase=1, node=Node.ALL, minimal_tau=20, path_model_cheville=path_model_cheville, min_bound=0, max_bound=np.inf
-    )
+        tau_actuator_constraints_max, phase=1, node=Node.ALL, minimal_tau=50, path_model_cheville=path_model_cheville, min_bound=-np.inf, max_bound=0, index=[2,3,4,5])
     constraints.add(
-        tau_actuator_constraints_min, phase=2, node=Node.ALL, minimal_tau=20, path_model_cheville=path_model_cheville, min_bound=0, max_bound=np.inf
-    )
-
-    #contraintes sur le max
-    constraints.add(
-        tau_actuator_constraints_max, phase=0, node=Node.ALL, minimal_tau=20, path_model_cheville=path_model_cheville, min_bound=-np.inf, max_bound=0
-    )
-    constraints.add(
-        tau_actuator_constraints_max, phase=1, node=Node.ALL, minimal_tau=20, path_model_cheville=path_model_cheville, min_bound=-np.inf, max_bound=0
-    )
-    constraints.add(
-        tau_actuator_constraints_max, phase=2, node=Node.ALL, minimal_tau=20, path_model_cheville=path_model_cheville, min_bound=-np.inf, max_bound=0
-    )
-
+        tau_actuator_constraints_max, phase=2, node=Node.ALL, minimal_tau=50, path_model_cheville=path_model_cheville, min_bound=-np.inf, max_bound=0, index=[2,3,4,5])
 
     # Path constraint
     X_bounds = BoundsList()
@@ -361,8 +337,8 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
         )
     )
 
-    x_init[0].init[1, :] = np.linspace(-0.1, -1, 51)
-    x_init[1].init[1, :] = np.linspace(-1, -0.1, 51)
+    x_init[0].init[1, :] = np.linspace(-0.1, -1.2, 51)
+    x_init[1].init[1, :] = np.linspace(-1.2, -0.1, 51)
     #interpol lineaire sur qjambe_rotx
     x_init[2].init[2, :] = (np.linspace(0, (2*np.pi), 51))
 
@@ -466,7 +442,7 @@ if __name__ == "__main__":
 
 #
         solver = Solver.IPOPT(show_online_optim=True, show_options=dict(show_bounds=True))
-        solver.set_maximum_iterations(100000)
+        solver.set_maximum_iterations(1550)
         solver.set_tol(1e-3)
         solver.set_constr_viol_tol(1e-3)
         solver.set_linear_solver("ma57")
