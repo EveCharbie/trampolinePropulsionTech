@@ -199,9 +199,7 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
         1.5,
     )
 
-    tau_min, tau_max, tau_init = -1000, 1000, 0
-
-    nq = biorbd_model[0].nbQ()
+    tau_min, tau_max, tau_init = -10000, 10000, 0
 
     ### --- Add objective functions --- ###
     objective_functions = ObjectiveList()
@@ -209,7 +207,7 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
     objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_COM_VELOCITY, node=Node.END, weight=-1, phase=1, quadratic=False, axes=Axis.Z) #maximiser la vitesse au moment du decollage
     objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_COM_POSITION, weight=-weight, phase=2, quadratic=False, axes=Axis.Z) #
 
-    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", weight=1, phase=0, index=[2,3,4,5]) #
+    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", weight=1, phase=0, index=[2,3,4,5])
     objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", derivative=True, weight=100, phase=0)
     objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", weight=1, phase=1, index=[2,3,4,5])
     objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", derivative=True, weight=100, phase=1)
@@ -270,7 +268,7 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
     X_bounds[0].min[1:3, 1] = [-1.2, -0.5]
     X_bounds[0].max[1:3, 1] = [0, 0.5]
     X_bounds[0].min[1:3, 2] = [-1.2, -0.5]
-    X_bounds[0].max[1:3, 2] = [0, 0.5]
+    X_bounds[0].max[1:3, 2] = [-0.5, 0.5]
 
     X_bounds.add(bounds=QAndQDotBounds(biorbd_model[1]))
     X_bounds[1].min[:1, 1:] = [-0.3]
@@ -311,7 +309,7 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
     x_init = InitialGuessList()
     x_init.add(NoisedInitialGuess(
             [0]*12, # (nq + nqdot)
-            bounds=X_bounds[0],
+            bounds=X_bounds[0], #phase
             noise_magnitude=0.2,
             n_shooting=number_shooting_points[0],
             bound_push=0.01,
@@ -337,8 +335,8 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
         )
     )
 
-    x_init[0].init[1, :] = np.linspace(-0.1, -1.2, 51)
-    x_init[1].init[1, :] = np.linspace(-1.2, -0.1, 51)
+    x_init[0].init[1, :] = np.linspace(-0.1, -1.0, 51)
+    x_init[1].init[1, :] = np.linspace(-1.0, -0.1, 51)
     #interpol lineaire sur qjambe_rotx
     x_init[2].init[2, :] = (np.linspace(0, (2*np.pi), 51))
 
@@ -394,13 +392,6 @@ if __name__ == "__main__":
     f.write(" Debut ici \n\n\n")
     f.close()
 
-    # Salto_1 = np.array([0, 0, 0, 0, 0,  0,  0,  0,  0,
-    #                     1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3,
-    #                      1,  1,  1,  1, 2,  2,  2,  2,  3,  3,  3,  3])
-    # Salto_2 = np.array([0, 1, 2, 3, 4, -1, -2, -3, -4,
-    #                     1, 2, 3, 4, 1, 2, 3, 4, 1, 2, 3, 4,
-    #                     -1, -2, -3, -4, -1, -2, -3, -4, -1, -2, -3, -4])
-
     Salto_1 = np.array([1])
     Salto_2 = np.array([1])
 
@@ -442,7 +433,7 @@ if __name__ == "__main__":
 
 #
         solver = Solver.IPOPT(show_online_optim=True, show_options=dict(show_bounds=True))
-        solver.set_maximum_iterations(1550)
+        solver.set_maximum_iterations(100000)
         solver.set_tol(1e-3)
         solver.set_constr_viol_tol(1e-3)
         solver.set_linear_solver("ma57")
