@@ -53,7 +53,7 @@ def custom_spring_const(pn: PenaltyNode, lut_verticale, lut_horizontale) -> cas.
     Force[1] = lut_horizontale(Marker_pied[1:])
     Force[2] = lut_verticale(Marker_pied[1:])
 
-    return_value = cas.vertcat(u_i[1] - Force[2], u_i[1] - Force[2])
+    return_value = cas.vertcat(u_i[0] - Force[1], u_i[1] - Force[2])
 
     val_contrainte = cas.Function("Force", [pn.nlp.states['q'].mx, pn.nlp.controls['tau'].mx], [return_value])(pn.nlp.states['q'].cx, pn.nlp.controls['tau'].cx)
 
