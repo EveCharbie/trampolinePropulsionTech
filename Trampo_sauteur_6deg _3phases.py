@@ -241,20 +241,20 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
     constraints.add(custom_spring_const, lut_verticale=lut_verticale, lut_horizontale=lut_horizontale, node=Node.ALL, min_bound=0, max_bound=0, phase=1)
 
     #contraintes sur le couple min
-    constraints.add(
-        tau_actuator_constraints_min, phase=0, node=Node.ALL, minimal_tau=50, path_model_cheville=path_model_cheville, min_bound=-np.inf, max_bound=0, index=[2,3,4,5])
-    constraints.add(
-        tau_actuator_constraints_min, phase=1, node=Node.ALL, minimal_tau=50, path_model_cheville=path_model_cheville, min_bound=-np.inf, max_bound=0, index=[2,3,4,5])
-    constraints.add(
-        tau_actuator_constraints_min, phase=2, node=Node.ALL, minimal_tau=50, path_model_cheville=path_model_cheville, min_bound=-np.inf, max_bound=0, index=[2,3,4,5])
+    # constraints.add(
+    #     tau_actuator_constraints_min, phase=0, node=Node.ALL, minimal_tau=50, path_model_cheville=path_model_cheville, min_bound=-np.inf, max_bound=0, index=[2,3,4,5])
+    # constraints.add(
+    #     tau_actuator_constraints_min, phase=1, node=Node.ALL, minimal_tau=50, path_model_cheville=path_model_cheville, min_bound=-np.inf, max_bound=0, index=[2,3,4,5])
+    # constraints.add(
+    #     tau_actuator_constraints_min, phase=2, node=Node.ALL, minimal_tau=50, path_model_cheville=path_model_cheville, min_bound=-np.inf, max_bound=0, index=[2,3,4,5])
 
     #contraintes sur le couple max
-    constraints.add(
-        tau_actuator_constraints_max, phase=0, node=Node.ALL, minimal_tau=50, path_model_cheville=path_model_cheville, min_bound=-np.inf, max_bound=0, index=[2,3,4,5])
-    constraints.add(
-        tau_actuator_constraints_max, phase=1, node=Node.ALL, minimal_tau=50, path_model_cheville=path_model_cheville, min_bound=-np.inf, max_bound=0, index=[2,3,4,5])
-    constraints.add(
-        tau_actuator_constraints_max, phase=2, node=Node.ALL, minimal_tau=50, path_model_cheville=path_model_cheville, min_bound=-np.inf, max_bound=0, index=[2,3,4,5])
+    # constraints.add(
+    #     tau_actuator_constraints_max, phase=0, node=Node.ALL, minimal_tau=50, path_model_cheville=path_model_cheville, min_bound=-np.inf, max_bound=0, index=[2,3,4,5])
+    # constraints.add(
+    #     tau_actuator_constraints_max, phase=1, node=Node.ALL, minimal_tau=50, path_model_cheville=path_model_cheville, min_bound=-np.inf, max_bound=0, index=[2,3,4,5])
+    # constraints.add(
+    #     tau_actuator_constraints_max, phase=2, node=Node.ALL, minimal_tau=50, path_model_cheville=path_model_cheville, min_bound=-np.inf, max_bound=0, index=[2,3,4,5])
 
     # Path constraint
     X_bounds = BoundsList()
@@ -263,12 +263,17 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
     X_bounds[0].min[:1, 1:] = [-0.3]
     X_bounds[0].max[:1, 1:] = [0.3]
 
-    X_bounds[0].min[:, 0] = [-0.3, 0, -0.4323, 1.4415, -1.5564, 1.02, -10, -30, -1, -1, -1, -1]
-    X_bounds[0].max[:, 0] = [0.3, 0, -0.4323, 1.4415, -1.5564, 1.02, 10, 3, 1, 1, 1, 1]
+    X_bounds[0].min[:, 0] = [-0.3, 0, -0.4323, 1.4415, -1.5564, 1.02, -10, -12, -1, -1, -1, -1]
+    X_bounds[0].max[:, 0] = [0.3, 0, -0.4323, 1.4415, -1.5564, 1.02, 10, -12, 1, 1, 1, 1]
     X_bounds[0].min[1:3, 1] = [-1.2, -0.5]
     X_bounds[0].max[1:3, 1] = [0, 0.5]
     X_bounds[0].min[1:3, 2] = [-1.2, -0.5]
-    X_bounds[0].max[1:3, 2] = [-0.5, 0.5]
+    X_bounds[0].max[1:3, 2] = [0, 0.5]
+
+    X_bounds[0].min[7:8, 1] = [-15]
+    X_bounds[0].max[7:8, 1] = [0]
+    X_bounds[0].min[7:8, 2] = [0]
+    X_bounds[0].max[7:8, 2] = [0]
 
     X_bounds.add(bounds=QAndQDotBounds(biorbd_model[1]))
     X_bounds[1].min[:1, 1:] = [-0.3]
