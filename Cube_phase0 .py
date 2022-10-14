@@ -56,16 +56,27 @@ def custom_dynamic(states, controls, parameters, nlp):
     Force = cas.MX.zeros(3)
     Force[1] = lut_horizontale(Marker_pied[1:])
     Force[2] = lut_verticale(Marker_pied[1:])
-    f_contacts = biorbd.VecBiorbdVector()
-    f_contacts.append(Force)
+    # f_contacts = biorbd.VecBiorbdVector()
+    # f_contacts.append(Force)
+    #embed()
+    #f_contact = nlp.controls["fext"].mx if "fext" in nlp.controls.keys() else nlp.states["fext"].mx
+    count = 0
+    f_contact_vec = biorbd.VecBiorbdVector()
+
+    for ii in range(nlp.model.nbRigidContacts()):
+        n_f_contact = len(nlp.model.rigidContactAxisIdx(ii))
+        idx = [i + count for i in range(n_f_contact)]
+        f_contact_vec.append(Force[idx])
+        count = count + n_f_contact
 
     f_ext = biorbd.VecBiorbdSpatialVector()
     f_ext.append(biorbd.SpatialVector(np.array([0, 0, 0, 0, 0, 0])))
+    qddot = nlp.model.ForwardDynamics(q, qdot, tau, None, f_contact_vec).to_mx()
 
     # f_ext = biorbd.SpatialVector()
     # f_ext.append(0, 0, 0, 0, 0, 0)
     # qddot = nlp.model.ForwardDynamics(q, qdot, tau, f_ext).to_mx()
-    qddot = nlp.model.ForwardDynamics(q, qdot, tau, f_ext, f_contacts).to_mx()
+    #qddot = nlp.model.ForwardDynamics(q, qdot, tau, f_ext, f_contacts).to_mx()
 
     return DynamicsEvaluation(dxdt=cas.vertcat(qdot, qddot), defects=None)
 
@@ -196,7 +207,8 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
 
     # Add objective functions
     objective_functions = ObjectiveList()
-    objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE, key="q", node=Node.END, index=1, weight=10000, phase=0, quadratic=False)  # etre le plus bas a la fin de la phase 0
+    objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE, key="q", node=Node.END, index=1, weight=1000, phase=0, quadratic=False)  # etre le plus bas a la fin de la phase 0
+    #objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE, key="qdot", node=Node.START, index=1, weight=1, phase=0,quadratic=False)  #augmenter la norme de la vitesse initale
 
     objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", weight=1, phase=0)
     objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", derivative=True, weight=1, phase=0)
@@ -225,10 +237,12 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
     #                 min_bound=-2, max_bound=2, phase=0)
 
     # Constraint
-    constraints.add(ConstraintFcn.TIME_CONSTRAINT, node=Node.END, min_bound=0.05, max_bound=0.9, phase=0)
+    constraints.add(ConstraintFcn.TIME_CONSTRAINT, node=Node.END, min_bound=0.05, max_bound=2, phase=0)
 
     # Path constraint
     X_bounds = BoundsList()
+
+    vitesse_de_depart = np.sqrt(2 * 9.81 * 8)  # 2*g*hauteur_saut
 
     X_bounds.add(bounds=QAndQDotBounds(biorbd_model))
     X_bounds[0].min[:1, 1:] = [-0.3]
@@ -236,12 +250,11 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
 
     X_bounds[0].min[:, 0] = [-0.3, 0, -0.5,  -1, -12, -1]
     X_bounds[0].max[:, 0] = [0.3, 0, 0.5, 1, -12, 1]
-    X_bounds[0].min[1:3, 1] = [-12, -0.5]
+    X_bounds[0].min[1:3, 1] = [-6, -0.5]
     X_bounds[0].max[1:3, 1] = [0, 0.5]
-    X_bounds[0].min[1:3 ,2] = [-12, -0.5]
+    X_bounds[0].min[1:3 ,2] = [-6, -0.5]
     X_bounds[0].max[1:3, 2] = [0, 0.5]
 
-    vitesse_de_depart = np.sqrt(2*9.81*8) #2*g*hauteur_saut
     X_bounds[0].min[4:5, 1] = [-vitesse_de_depart]
     X_bounds[0].max[4:5, 1] = [0]
     X_bounds[0].min[4:5, 2] = [0]
@@ -329,7 +342,7 @@ if __name__ == "__main__":
 
     Salto1 = 1
     Salto2 = 1
-    weight = 10
+    weight = 1000
     i_rand = 10
 
     # ----------------------------------------------- Sauteur_8 --------------------------------------------------------
