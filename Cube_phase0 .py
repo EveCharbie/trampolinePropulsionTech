@@ -208,7 +208,7 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
     # Add objective functions
     objective_functions = ObjectiveList()
     objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE, key="q", node=Node.END, index=1, weight=1000, phase=0, quadratic=False)  # etre le plus bas a la fin de la phase 0
-    #objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE, key="qdot", node=Node.START, index=1, weight=1, phase=0,quadratic=False)  #augmenter la norme de la vitesse initale
+    #objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE, key="qdot", node=Node.START, index=1, weight=1, phase=0, quadratic=False)  #augmenter la norme de la vitesse initale
 
     objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", weight=1, phase=0)
     objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", derivative=True, weight=1, phase=0)
@@ -237,7 +237,7 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
     #                 min_bound=-2, max_bound=2, phase=0)
 
     # Constraint
-    constraints.add(ConstraintFcn.TIME_CONSTRAINT, node=Node.END, min_bound=0.05, max_bound=2, phase=0)
+    constraints.add(ConstraintFcn.TIME_CONSTRAINT, node=Node.END, min_bound=0.05, max_bound=0.8, phase=0)
 
     # Path constraint
     X_bounds = BoundsList()
@@ -311,11 +311,6 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
 
 if __name__ == "__main__":
 
-    Date = date.today()
-    Date = Date.strftime("%d-%m-%y")
-    f = open(f"Historique_{Date}.txt", "w+")
-    f.write(" Debut ici \n\n\n")
-    f.close()
 
     Salto_1 = np.array([1])
     Salto_2 = np.array([1])
@@ -346,9 +341,7 @@ if __name__ == "__main__":
     i_rand = 10
 
     # ----------------------------------------------- Sauteur_8 --------------------------------------------------------
-    f = open(f"Historique_{Date}.txt", "a+")
-    f.write(f"\n\n\nSalto1{Salto1}_Salto2{Salto2}_DoF6_weight{weight}_random{i_rand} : ")
-    f.close()
+
 
     tic = time()
     ocp = prepare_ocp_back_back(path_model_cheville=path_model_cheville, lut_verticale=lut_verticale,
