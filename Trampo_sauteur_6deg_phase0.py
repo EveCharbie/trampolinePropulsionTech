@@ -212,7 +212,7 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
     objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE, key="q", node=Node.END, index=1, weight=1000, phase=0, quadratic=False)  # etre le plus bas a la fin de la phase 0
 
     objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", weight=1, phase=0)
-    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", derivative=True, weight=10, phase=0)
+    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", derivative=True, weight=1, phase=0)
 
     # arriver avec les pieds au centre de la toile
     objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE, key="q", phase=0, node=Node.START, index=0, weight=100,
@@ -234,13 +234,13 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
     # contraintes sur le min
     # constraints.add(
     #     tau_actuator_constraints_min, phase=0, node=Node.ALL, minimal_tau=20, path_model_cheville=path_model_cheville,
-    #     min_bound=-np.inf, max_bound=0
+    #     min_bound=-np.inf, max_bound=100
     # )
 
     # contraintes sur le max
     # constraints.add(
     #     tau_actuator_constraints_max, phase=0, node=Node.ALL, minimal_tau=20, path_model_cheville=path_model_cheville,
-    #     min_bound=-np.inf, max_bound=0
+    #     min_bound=-np.inf, max_bound=100
     # )
 
     # Path constraint
@@ -250,15 +250,17 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
     X_bounds[0].min[:1, 1:] = [-0.3]
     X_bounds[0].max[:1, 1:] = [0.3]
 
-    X_bounds[0].min[:, 0] = [-0.3, 0, -0.4323, 1.4415, -1.5564, 1.02, -10, -300, -1, -1, -1, -1]
-    X_bounds[0].max[:, 0] = [0.3, 0, -0.4323, 1.4415, -1.5564, 1.02, 10, 30, 1, 1, 1, 1]
+    X_bounds[0].min[:, 0] = [-0.3, 0, -0.4323, 1.4415, -1.5564, 1.02, -10, -12, -1, -1, -1, -1]
+    X_bounds[0].max[:, 0] = [0.3, 0, -0.4323, 1.4415, -1.5564, 1.02, 10, -12, 1, 1, 1, 1]
     X_bounds[0].min[1:3, 1] = [-1.2, -0.5]
     X_bounds[0].max[1:3, 1] = [0, 0.5]
     X_bounds[0].min[1:3, 2] = [-1.2, -0.5]
     X_bounds[0].max[1:3, 2] = [0, 0.5]
 
-    X_bounds[0].min[7:8, 1] = [-300]
-    X_bounds[0].max[7:8, 1] = [30]
+    X_bounds[0].min[7:8, 1] = [-15]
+    X_bounds[0].max[7:8, 1] = [0]
+    X_bounds[0].min[7:8, 2] = [0]
+    X_bounds[0].max[7:8, 2] = [0]
 
     # Define control path constraint
     u_bounds = BoundsList()

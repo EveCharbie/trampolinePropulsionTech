@@ -20,7 +20,10 @@ from bioptim import (
     ConstraintFcn,
     ObjectiveFcn,
     ObjectiveList,
+    Dynamics,
     DynamicsList,
+    DynamicsFunctions,
+    DynamicsEvaluation,
     DynamicsFcn,
     BoundsList,
     QAndQDotBounds,
@@ -34,30 +37,40 @@ from bioptim import (
     BiMapping,
     Solver,
     BiorbdInterface,
+    NonLinearProgram,
+    ConfigureProblem,
 )
 
+def custom_dynamic(states, controls, parameters, nlp):
 
-def custom_spring_const(pn: PenaltyNode, lut_verticale, lut_horizontale) -> cas.MX: #ajout de la force de la toile comme etant la force appliquee a la cheville
+    q = DynamicsFunctions.get(nlp.states["q"], states)
+    qdot = DynamicsFunctions.get(nlp.states["qdot"], states)
+    tau = DynamicsFunctions.get(nlp.controls["tau"], controls)
 
-    # nq = int(pn.nlp.states.shape /2) #nombre de degres de liberté
-
-    val_contrainte = []
-
-    u_i = pn.nlp.variable_mappings["tau"].to_second.map(pn.nlp.controls["tau"].mx)
-    q_i = pn.nlp.variable_mappings['tau'].to_second.map(pn.nlp.states['q'].mx)
-
-    Markers = pn.nlp.model.markers(pn.nlp.states["q"].mx)
+    Markers = nlp.model.markers(q)
     Marker_pied = Markers[0].to_mx()
 
     Force = cas.MX.zeros(3)
     Force[1] = lut_horizontale(Marker_pied[1:])
     Force[2] = lut_verticale(Marker_pied[1:])
 
-    return_value = cas.vertcat(u_i[1] - Force[2], u_i[1] - Force[2])
+    return_value = cas.vertcat((tau[0] - Force[1]), (tau[1] - Force[2]))
 
-    val_contrainte = cas.Function("Force", [pn.nlp.states['q'].mx, pn.nlp.controls['tau'].mx], [return_value])(pn.nlp.states['q'].cx, pn.nlp.controls['tau'].cx)
+    f_ext = biorbd.VecBiorbdSpatialVector()
+    f_ext.append(biorbd.SpatialVector(return_value))
+    qddot = nlp.model.ForwardDynamics(q, qdot, tau, f_ext).to_mx()
 
-    return val_contrainte
+    # val_contrainte = cas.Function("Force", [pn.nlp.states['q'].mx, pn.nlp.controls['tau'].mx], [return_value])(
+    #     pn.nlp.states['q'].cx, pn.nlp.controls['tau'].cx)
+
+    return DynamicsEvaluation(dxdt=cas.vertcat(qdot, qddot), defects=None)
+
+def custom_configure(ocp: OptimalControlProgram, nlp: NonLinearProgram):
+
+    ConfigureProblem.configure_q(nlp, as_states=True, as_controls=False)
+    ConfigureProblem.configure_qdot(nlp, as_states=True, as_controls=False)
+    ConfigureProblem.configure_tau(nlp, as_states=False, as_controls=True)
+    ConfigureProblem.configure_dynamics_function(ocp, nlp, custom_dynamic)
 
 
 def CoM_base_appui(pn: PenaltyNode) -> cas.MX:#centre de masse au dessus de la point de contatc avec la toile, pour rester debout, a ajouter dans contrainte
@@ -192,33 +205,34 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
     )
 
     final_time = (
-        0.3,
-        0.3,
+        0.2,
+        0.2,
     )
 
-    tau_min, tau_max, tau_init = -10000, 10000, 0
+    tau_min, tau_max, tau_init = -100000, 100000, 0
 
     # Add objective functions
     objective_functions = ObjectiveList()
-    objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE, key="q", node=Node.END, index=1, weight=100, phase=0, quadratic=False)
+    objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE, key="q", node=Node.END, index=1, weight=1000, phase=0, quadratic=False)
 
     objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", weight=1, phase=0)
-    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", derivative=True, weight=100, phase=0)
+    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", derivative=True, weight=10, phase=0)
     objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", weight=1, phase=1)
-    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", derivative=True, weight=100, phase=1)
+    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", derivative=True, weight=10, phase=1)
 
     # arriver avec les pieds au centre de la toile
     objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE, key="q", phase=0, node=Node.START, index=0, weight=100, target=np.zeros((1, 1)))
     objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE, key="q", phase=0, node=Node.START, index=1, weight=100, target=np.zeros((1, 1)))
     objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE, key="q", phase=1, node=Node.END, index=0, weight=100, target=np.zeros((1, 1)))
     objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE, key="q", phase=1, node=Node.END, index=1, weight=100, target=np.zeros((1, 1)))
+
     #maximiser la vitesse de remonter
     objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_COM_VELOCITY, phase=1, node=Node.END, weight=-1, quadratic=False, axes=Axis.Z)
 
     # # Dynamics
     dynamics = DynamicsList()
-    dynamics.add(DynamicsFcn.TORQUE_DRIVEN)
-    dynamics.add(DynamicsFcn.TORQUE_DRIVEN)
+    dynamics.add(Dynamics(custom_configure, dynamic_function=custom_dynamic))
+    dynamics.add(Dynamics(custom_configure, dynamic_function=custom_dynamic))
 
     # --- Constraints --- #
     constraints = ConstraintList()
@@ -227,39 +241,20 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
     constraints.add(ConstraintFcn.TIME_CONSTRAINT, node=Node.END, min_bound=0.2, max_bound=3, phase=0)
     constraints.add(ConstraintFcn.TIME_CONSTRAINT, node=Node.END, min_bound=0.2, max_bound=3, phase=1)
 
-    constraints.add(
-        custom_spring_const,
-        lut_verticale=lut_verticale,
-        lut_horizontale=lut_horizontale,
-        node=Node.ALL,
-        min_bound=0,
-        max_bound=0,
-        phase=0,
-    )
-    constraints.add(
-        custom_spring_const,
-        lut_verticale=lut_verticale,
-        lut_horizontale=lut_horizontale,
-        node=Node.ALL,
-        min_bound=0,
-        max_bound=0,
-        phase=1,
-    )
-
     #contraintes sur le min
     constraints.add(
-        tau_actuator_constraints_min, phase=0, node=Node.ALL, minimal_tau=20, path_model_cheville=path_model_cheville, min_bound=-np.inf, max_bound=1000
+        tau_actuator_constraints_min, phase=0, node=Node.ALL, minimal_tau=20, path_model_cheville=path_model_cheville, min_bound=-np.inf, max_bound=0
     )
     constraints.add(
-        tau_actuator_constraints_min, phase=1, node=Node.ALL, minimal_tau=20, path_model_cheville=path_model_cheville, min_bound=-np.inf, max_bound=1000
+        tau_actuator_constraints_min, phase=1, node=Node.ALL, minimal_tau=20, path_model_cheville=path_model_cheville, min_bound=-np.inf, max_bound=0
     )
 
     #contraintes sur le max
     constraints.add(
-        tau_actuator_constraints_max, phase=0, node=Node.ALL, minimal_tau=20, path_model_cheville=path_model_cheville, min_bound=-np.inf, max_bound=1000
+        tau_actuator_constraints_max, phase=0, node=Node.ALL, minimal_tau=20, path_model_cheville=path_model_cheville, min_bound=-np.inf, max_bound=0
     )
     constraints.add(
-        tau_actuator_constraints_max, phase=1, node=Node.ALL, minimal_tau=20, path_model_cheville=path_model_cheville, min_bound=-np.inf, max_bound=1000
+        tau_actuator_constraints_max, phase=1, node=Node.ALL, minimal_tau=20, path_model_cheville=path_model_cheville, min_bound=-np.inf, max_bound=0
     )
 
 

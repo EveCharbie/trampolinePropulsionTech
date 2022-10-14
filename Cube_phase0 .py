@@ -10,6 +10,7 @@ import biorbd_casadi as biorbd
 import os
 import matplotlib.pyplot as plt
 from datetime import date
+from IPython import embed
 
 from bioptim import (
     Node,
@@ -47,19 +48,24 @@ def custom_dynamic(states, controls, parameters, nlp):
 
     Markers = nlp.model.markers(q)
     Marker_pied = Markers[0].to_mx()
+    #
+    # Force = cas.MX.zeros(6)
+    # Force[4] = lut_horizontale(Marker_pied[1:])
+    # Force[5] = lut_verticale(Marker_pied[1:])
 
     Force = cas.MX.zeros(3)
     Force[1] = lut_horizontale(Marker_pied[1:])
     Force[2] = lut_verticale(Marker_pied[1:])
-
-    return_value = cas.vertcat((tau[0] - Force[1]), (tau[1] - Force[2]))
+    f_contacts = biorbd.VecBiorbdVector()
+    f_contacts.append(Force)
 
     f_ext = biorbd.VecBiorbdSpatialVector()
-    f_ext.append(biorbd.SpatialVector(return_value))
-    qddot = nlp.model.ForwardDynamics(q, qdot, tau, f_ext).to_mx()
+    f_ext.append(biorbd.SpatialVector(np.array([0, 0, 0, 0, 0, 0])))
 
-    # val_contrainte = cas.Function("Force", [pn.nlp.states['q'].mx, pn.nlp.controls['tau'].mx], [return_value])(
-    #     pn.nlp.states['q'].cx, pn.nlp.controls['tau'].cx)
+    # f_ext = biorbd.SpatialVector()
+    # f_ext.append(0, 0, 0, 0, 0, 0)
+    # qddot = nlp.model.ForwardDynamics(q, qdot, tau, f_ext).to_mx()
+    qddot = nlp.model.ForwardDynamics(q, qdot, tau, f_ext, f_contacts).to_mx()
 
     return DynamicsEvaluation(dxdt=cas.vertcat(qdot, qddot), defects=None)
 
@@ -68,36 +74,103 @@ def custom_configure(ocp: OptimalControlProgram, nlp: NonLinearProgram):
     ConfigureProblem.configure_q(nlp, as_states=True, as_controls=False)
     ConfigureProblem.configure_qdot(nlp, as_states=True, as_controls=False)
     ConfigureProblem.configure_tau(nlp, as_states=False, as_controls=True)
-    ConfigureProblem.configure_dynamics_function(ocp, nlp, custom_dynamic)
+    ConfigureProblem.configure_dynamics_function(ocp, nlp, custom_dynamic, expand=False)
 
-# def custom_spring_const(pn: PenaltyNode, lut_verticale,lut_horizontale) -> cas.MX:  # ajout de la force de la toile comme etant la force appliquee a la cheville
-#
-#     # nq = int(pn.nlp.states.shape /2) #nombre de degres de liberté
-#
-#     val_contrainte = []
-#
-#     u_i = pn.nlp.variable_mappings["tau"].to_second.map(pn.nlp.controls["tau"].mx)
-#     q_i = pn.nlp.variable_mappings['q'].to_second.map(pn.nlp.states['q'].mx)
-#
-#     Markers = pn.nlp.model.markers(q_i)
-#     Marker_pied = Markers[0].to_mx()
-#
-#     Force = cas.MX.zeros(3)
-#     Force[1] = lut_horizontale(Marker_pied[1:])
-#     Force[2] = lut_verticale(Marker_pied[1:])
-#
-#     return_value = cas.vertcat((u_i[0] - Force[1]), (u_i[1] - Force[2]))
-#
-#     val_contrainte = cas.Function("Force", [pn.nlp.states['q'].mx, pn.nlp.controls['tau'].mx], [return_value])(
-#         pn.nlp.states['q'].cx, pn.nlp.controls['tau'].cx)
-#
-#     force_ressort = cas.MX.zeros(3)
-#     force_ressort[2] = 1 * 1.2 ** 2
-#     r_v = cas.vertcat(u_i[1]-force_ressort[2])
-#     v_c = cas.Function("Force", [pn.nlp.states['q'].mx, pn.nlp.controls['tau'].mx], [r_v])(
-#         pn.nlp.states['q'].cx, pn.nlp.controls['tau'].cx)
-#
-#     return val_contrainte
+
+def custom_spring_const(pn: PenaltyNode, lut_verticale, lut_horizontale) -> cas.MX: #ajout de la force de la toile comme etant la force appliquee a la cheville
+
+    val_contrainte = []
+
+    u_i = pn.nlp.variable_mappings["tau"].to_second.map(pn.nlp.controls["tau"].mx)
+    q_i = pn.nlp.variable_mappings['tau'].to_second.map(pn.nlp.states['q'].mx)
+
+    Markers = pn.nlp.model.markers(pn.nlp.states["q"].mx)
+    Marker_pied = Markers[0].to_mx()
+
+    Force = cas.MX.zeros(3)
+    Force[1] = lut_horizontale(Marker_pied[1:])
+    Force[2] = lut_verticale(Marker_pied[1:])
+
+    return_value = cas.vertcat(u_i[0] - Force[1], u_i[1] - Force[2])
+
+    val_contrainte = cas.Function("Force", [pn.nlp.states['q'].mx, pn.nlp.controls['tau'].mx], [return_value])(pn.nlp.states['q'].cx, pn.nlp.controls['tau'].cx)
+
+    return val_contrainte
+
+def q_cheville_func(Q):
+    q_mod = cas.fmod(Q, 2 * np.pi)
+    q_out = cas.if_else(
+        q_mod < 0,
+        cas.if_else(q_mod < -np.pi, -(-2 * np.pi - q_mod), -q_mod),
+        cas.if_else(q_mod > np.pi, -(2 * np.pi - q_mod), -q_mod),
+    )
+    fun = cas.Function("q_cheville", [Q], [q_out])
+    return fun
+
+def tau_actuator_constraints_min(pn: PenaltyNode, path_model_cheville: str, minimal_tau: float = None) -> cas.MX:
+    model_cheville = biorbd.Model(path_model_cheville)
+    q_cheville = cas.MX.sym("q_cheville", 1)
+    qdot_cheville = cas.MX.sym("q_dot_cheville", 1)
+
+    nq = int(pn.nlp.states.shape / 2)
+
+    q_mx = pn.nlp.states["q"].mx
+    qdot_mx = pn.nlp.states["qdot"].mx
+    tau_mx = pn.nlp.controls["tau"].mx
+    func_cheville = cas.Function("torqueMax_cheville", [q_cheville, qdot_cheville],
+                                 [model_cheville.torqueMax(q_cheville, qdot_cheville)[1].to_mx()])
+
+    func_q_cheville = q_cheville_func(q_cheville)
+    bound_cheville = func_cheville(func_q_cheville(q_mx[2]), -qdot_mx[2])
+
+    min_bound = []
+    bound = pn.nlp.model.torqueMax(q_mx, qdot_mx)[1].to_mx()
+    min_boundz = cas.if_else(bound[2:nq] < minimal_tau, minimal_tau, bound[2:nq])
+    min_boundz[0, 0] = 0
+    min_bound.append(min_boundz)
+    min_bound[0] = cas.vertcat(np.ones((2,)) * -1000000, min_bound[0])
+
+    obj = []
+    obj.append(tau_mx)
+    obj_star = cas.vertcat(*obj)
+    min_bound = cas.vertcat(*min_bound)
+
+    constraint_min = BiorbdInterface.mx_to_cx("tau_actuator_constraints_min", min_bound -obj_star , pn.nlp.states["q"], pn.nlp.states["qdot"], pn.nlp.controls["tau"])
+
+    return constraint_min
+
+
+def tau_actuator_constraints_max(pn: PenaltyNode, path_model_cheville: str, minimal_tau: float = None) -> cas.MX:
+    model_cheville = biorbd.Model(path_model_cheville)
+    q_cheville = cas.MX.sym("q_cheville", 1)
+    qdot_cheville = cas.MX.sym("q_dot_cheville", 1)
+
+    nq = int(pn.nlp.states.shape / 2)
+
+    q_mx = pn.nlp.states["q"].mx
+    qdot_mx = pn.nlp.states["qdot"].mx
+    tau_mx = pn.nlp.controls["tau"].mx
+    func_cheville = cas.Function("torqueMax_cheville", [q_cheville, qdot_cheville],
+                                 [model_cheville.torqueMax(q_cheville, qdot_cheville)[0].to_mx()])
+
+    func_q_cheville = q_cheville_func(q_cheville)
+    bound_cheville = func_cheville(func_q_cheville(q_mx[2]), -qdot_mx[2])
+
+    max_bound = []
+    bound = pn.nlp.model.torqueMax(q_mx, qdot_mx)[0].to_mx()
+    max_boundz = cas.if_else(bound[2:nq] < minimal_tau, minimal_tau, bound[2:nq])
+    max_boundz[0, 0] = cas.if_else(bound_cheville[:, 0] < minimal_tau, minimal_tau,bound_cheville[:, 0])
+    max_bound.append(max_boundz)
+    max_bound[0] = cas.vertcat(np.ones((2,)) * 1000000, max_bound[0])
+
+    obj = []
+    obj.append(tau_mx)
+    obj_star = cas.vertcat(*obj)
+    max_bound = cas.vertcat(*max_bound)
+
+    constraint_max = BiorbdInterface.mx_to_cx("tau_actuator_constraints_max", obj_star - max_bound, pn.nlp.states["q"],
+                                              pn.nlp.states["qdot"], pn.nlp.controls["tau"])
+    return constraint_max
 
 def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, weight, Salto1, Salto2):
     # --- Options --- #
@@ -119,7 +192,7 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
         0.1,
     )
 
-    tau_min, tau_max, tau_init = -100000, 100000, 0
+    tau_min, tau_max, tau_init = -10000, 10000, 0
 
     # Add objective functions
     objective_functions = ObjectiveList()
@@ -136,14 +209,23 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
 
     # # Dynamics
     dynamics = DynamicsList()
-    #dynamics.add(DynamicsFcn.TORQUE_DRIVEN)
+    # dynamics.add(DynamicsFcn.TORQUE_DRIVEN)
     dynamics = Dynamics(custom_configure, dynamic_function=custom_dynamic)
 
     # --- Constraints --- #
     constraints = ConstraintList()
+    # constraints.add(
+    #     tau_actuator_constraints_min, phase=0, node=Node.ALL, minimal_tau=50, path_model_cheville=path_model_cheville,
+    #     min_bound=-np.inf, max_bound=0)
+    # constraints.add(
+    #     tau_actuator_constraints_max, phase=0, node=Node.ALL, minimal_tau=50, path_model_cheville=path_model_cheville,
+    #     min_bound=-np.inf, max_bound=0)
 
-    # Constraint arm positivity
-    constraints.add(ConstraintFcn.TIME_CONSTRAINT, node=Node.END, min_bound=0.05, max_bound=0.6, phase=0)
+    # constraints.add(custom_spring_const, lut_verticale=lut_verticale, lut_horizontale=lut_horizontale, node=Node.ALL,
+    #                 min_bound=-2, max_bound=2, phase=0)
+
+    # Constraint
+    constraints.add(ConstraintFcn.TIME_CONSTRAINT, node=Node.END, min_bound=0.05, max_bound=0.9, phase=0)
 
     # Path constraint
     X_bounds = BoundsList()
@@ -152,15 +234,18 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
     X_bounds[0].min[:1, 1:] = [-0.3]
     X_bounds[0].max[:1, 1:] = [0.3]
 
-    X_bounds[0].min[:, 0] = [-0.3, 0, -0.5,  -1, -300, -1]
-    X_bounds[0].max[:, 0] = [0.3, 0, 0.5, 1, 120, 1]
-    X_bounds[0].min[1:3, 1] = [-1.2, -0.5]
+    X_bounds[0].min[:, 0] = [-0.3, 0, -0.5,  -1, -12, -1]
+    X_bounds[0].max[:, 0] = [0.3, 0, 0.5, 1, -12, 1]
+    X_bounds[0].min[1:3, 1] = [-12, -0.5]
     X_bounds[0].max[1:3, 1] = [0, 0.5]
-    X_bounds[0].min[1:3 ,2] = [-1.2, -0.5]
+    X_bounds[0].min[1:3 ,2] = [-12, -0.5]
     X_bounds[0].max[1:3, 2] = [0, 0.5]
 
-    X_bounds[0].min[4:5, :] = [-300]
-    X_bounds[0].max[4:5, :] = [300]
+    vitesse_de_depart = np.sqrt(2*9.81*8) #2*g*hauteur_saut
+    X_bounds[0].min[4:5, 1] = [-vitesse_de_depart]
+    X_bounds[0].max[4:5, 1] = [0]
+    X_bounds[0].min[4:5, 2] = [0]
+    X_bounds[0].max[4:5, 2] = [0]
 
     # Define control path constraint
     u_bounds = BoundsList()
@@ -206,6 +291,7 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
         objective_functions=objective_functions,
         constraints=constraints,
         n_threads=4,
+        # use_sx=False,
     )
     return ocp
 
@@ -243,7 +329,7 @@ if __name__ == "__main__":
 
     Salto1 = 1
     Salto2 = 1
-    weight = 1000000
+    weight = 10
     i_rand = 10
 
     # ----------------------------------------------- Sauteur_8 --------------------------------------------------------
