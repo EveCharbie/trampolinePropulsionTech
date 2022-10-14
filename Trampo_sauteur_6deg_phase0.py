@@ -40,7 +40,6 @@ from bioptim import (
 )
 
 def custom_dynamic(states, controls, parameters, nlp):
-
     q = DynamicsFunctions.get(nlp.states["q"], states)
     qdot = DynamicsFunctions.get(nlp.states["qdot"], states)
     tau = DynamicsFunctions.get(nlp.controls["tau"], controls)
@@ -51,15 +50,16 @@ def custom_dynamic(states, controls, parameters, nlp):
     Force = cas.MX.zeros(3)
     Force[1] = lut_horizontale(Marker_pied[1:])
     Force[2] = lut_verticale(Marker_pied[1:])
+    count = 0
+    f_contact_vec = biorbd.VecBiorbdVector()
 
-    return_value = cas.vertcat((tau[0] - Force[1]), (tau[1] - Force[2]))
+    for ii in range(nlp.model.nbRigidContacts()):
+        n_f_contact = len(nlp.model.rigidContactAxisIdx(ii))
+        idx = [i + count for i in range(n_f_contact)]
+        f_contact_vec.append(Force[idx])
+        count = count + n_f_contact
 
-    f_ext = biorbd.VecBiorbdSpatialVector()
-    f_ext.append(biorbd.SpatialVector(return_value))
-    qddot = nlp.model.ForwardDynamics(q, qdot, tau, f_ext).to_mx()
-
-    # val_contrainte = cas.Function("Force", [pn.nlp.states['q'].mx, pn.nlp.controls['tau'].mx], [return_value])(
-    #     pn.nlp.states['q'].cx, pn.nlp.controls['tau'].cx)
+    qddot = nlp.model.ForwardDynamics(q, qdot, tau, None, f_contact_vec).to_mx()
 
     return DynamicsEvaluation(dxdt=cas.vertcat(qdot, qddot), defects=None)
 
@@ -68,7 +68,7 @@ def custom_configure(ocp: OptimalControlProgram, nlp: NonLinearProgram):
     ConfigureProblem.configure_q(nlp, as_states=True, as_controls=False)
     ConfigureProblem.configure_qdot(nlp, as_states=True, as_controls=False)
     ConfigureProblem.configure_tau(nlp, as_states=False, as_controls=True)
-    ConfigureProblem.configure_dynamics_function(ocp, nlp, custom_dynamic)
+    ConfigureProblem.configure_dynamics_function(ocp, nlp, custom_dynamic, expand=False)
 
 def CoM_base_appui(
         pn: PenaltyNode) -> cas.MX:  # centre de masse au dessus de la point de contact avec la toile, pour rester debout, a ajouter dans contrainte
@@ -191,19 +191,11 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
     model_path_massToile = "/home/lim/Documents/Jules/code_initiaux_Eve/collectesaut/SylvainMan_Sauteur_6DoF_massToile.bioMod"
 
     # Model path
-    biorbd_model = (
-        biorbd.Model(model_path)
-    )
+    biorbd_model = (biorbd.Model(model_path))
 
     nb_phases = 1
-
-    number_shooting_points = (
-        50,
-    )
-
-    final_time = (
-        0.1,
-    )
+    number_shooting_points = (50,)
+    final_time = ( 0.1, )
 
     tau_min, tau_max, tau_init = -100000, 100000, 0
 
