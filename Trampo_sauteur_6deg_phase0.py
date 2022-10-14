@@ -191,7 +191,7 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
     model_path_massToile = "/home/lim/Documents/Jules/code_initiaux_Eve/collectesaut/SylvainMan_Sauteur_6DoF_massToile.bioMod"
 
     # Model path
-    biorbd_model = (biorbd.Model(model_path))
+    biorbd_model = (biorbd.Model(model_path_massToile))
 
     nb_phases = 1
     number_shooting_points = (50,)
