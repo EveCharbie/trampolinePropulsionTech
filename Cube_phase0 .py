@@ -279,7 +279,7 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
         seed=i_rand,
     )
     )
-
+    #position
     x_init[0].init[1, :] = np.linspace(0, -1.2, 51)
 
     u_init = InitialGuessList()
