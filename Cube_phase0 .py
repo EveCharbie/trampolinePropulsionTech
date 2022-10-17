@@ -48,18 +48,11 @@ def custom_dynamic(states, controls, parameters, nlp):
 
     Markers = nlp.model.markers(q)
     Marker_pied = Markers[0].to_mx()
-    #
-    # Force = cas.MX.zeros(6)
-    # Force[4] = lut_horizontale(Marker_pied[1:])
-    # Force[5] = lut_verticale(Marker_pied[1:])
 
     Force = cas.MX.zeros(3)
     Force[1] = lut_horizontale(Marker_pied[1:])
     Force[2] = lut_verticale(Marker_pied[1:])
-    # f_contacts = biorbd.VecBiorbdVector()
-    # f_contacts.append(Force)
-    #embed()
-    #f_contact = nlp.controls["fext"].mx if "fext" in nlp.controls.keys() else nlp.states["fext"].mx
+
     count = 0
     f_contact_vec = biorbd.VecBiorbdVector()
 
@@ -73,10 +66,16 @@ def custom_dynamic(states, controls, parameters, nlp):
     f_ext.append(biorbd.SpatialVector(np.array([0, 0, 0, 0, 0, 0])))
     qddot = nlp.model.ForwardDynamics(q, qdot, tau, None, f_contact_vec).to_mx()
 
-    # f_ext = biorbd.SpatialVector()
-    # f_ext.append(0, 0, 0, 0, 0, 0)
+#########################test f ext###############
+    # force_vector = cas.MX.zeros(6)
+    # force_vector[4] = lut_horizontale(Marker_pied[1:])
+    # force_vector[5] = lut_verticale(Marker_pied[1:])
+    #
+    # f_ext = biorbd.VecBiorbdSpatialVector()
+    # f_ext.append(biorbd.SpatialVector(force_vector))
     # qddot = nlp.model.ForwardDynamics(q, qdot, tau, f_ext).to_mx()
-    #qddot = nlp.model.ForwardDynamics(q, qdot, tau, f_ext, f_contacts).to_mx()
+##################################################
+
 
     return DynamicsEvaluation(dxdt=cas.vertcat(qdot, qddot), defects=None)
 
