@@ -242,8 +242,10 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
     X_bounds[0].min[:1, 1:] = [-0.3]
     X_bounds[0].max[:1, 1:] = [0.3]
 
-    X_bounds[0].min[:, 0] = [-0.3, 0, -0.4323, 1.4415, -1.5564, 1.02, -10, -12, -1, -1, -1, -1]
-    X_bounds[0].max[:, 0] = [0.3, 0, -0.4323, 1.4415, -1.5564, 1.02, 10, -12, 1, 1, 1, 1]
+    vitesse_init = -12
+
+    X_bounds[0].min[:, 0] = [-0.3, 0, -0.4323, 1.4415, -1.5564, 1.02, -10, vitesse_init, -1, -1, -1, -1]
+    X_bounds[0].max[:, 0] = [0.3, 0, -0.4323, 1.4415, -1.5564, 1.02, 10, vitesse_init, 1, 1, 1, 1]
     X_bounds[0].min[1:3, 1] = [-1.2, -0.5]
     X_bounds[0].max[1:3, 1] = [0, 0.5]
     X_bounds[0].min[1:3, 2] = [-1.2, -0.5]
@@ -304,11 +306,11 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
 
 if __name__ == "__main__":
 
-    Date = date.today()
-    Date = Date.strftime("%d-%m-%y")
-    f = open(f"Historique_{Date}.txt", "w+")
-    f.write(" Debut ici \n\n\n")
-    f.close()
+    # Date = date.today()
+    # Date = Date.strftime("%d-%m-%y")
+    # f = open(f"Historique_{Date}.txt", "w+")
+    # f.write(" Debut ici \n\n\n")
+    # f.close()
 
     Salto_1 = np.array([1])
     Salto_2 = np.array([1])
@@ -339,16 +341,16 @@ if __name__ == "__main__":
     i_rand = 10
 
     # ----------------------------------------------- Sauteur_8 --------------------------------------------------------
-    f = open(f"Historique_{Date}.txt", "a+")
-    f.write(f"\n\n\nSalto1{Salto1}_Salto2{Salto2}_DoF6_weight{weight}_random{i_rand} : ")
-    f.close()
+    # f = open(f"Historique_{Date}.txt", "a+")
+    # f.write(f"\n\n\nSalto1{Salto1}_Salto2{Salto2}_DoF6_weight{weight}_random{i_rand} : ")
+    # f.close()
 
     tic = time()
     ocp = prepare_ocp_back_back(path_model_cheville=path_model_cheville, lut_verticale=lut_verticale,
                                 lut_horizontale=lut_horizontale, weight=weight, Salto1=Salto1, Salto2=Salto2, )
 
     solver = Solver.IPOPT(show_online_optim=True, show_options=dict(show_bounds=True))
-    solver.set_maximum_iterations(100000)
+    solver.set_maximum_iterations(1000000)
     solver.set_tol(1e-3)
     solver.set_constr_viol_tol(1e-3)
     solver.set_linear_solver("ma57")
