@@ -197,7 +197,7 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
     number_shooting_points = (50,)
     final_time = ( 0.1, )
 
-    tau_min, tau_max, tau_init = -100000, 100000, 0
+    tau_min, tau_max, tau_init = -10000, 10000, 0
 
     # Add objective functions
     objective_functions = ObjectiveList()
@@ -244,14 +244,14 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
 
     vitesse_init = -12
 
-    X_bounds[0].min[:, 0] = [-0.3, 0, -0.4323, 1.4415, -1.5564, 1.02, -10, vitesse_init, -1, -1, -1, -1]
-    X_bounds[0].max[:, 0] = [0.3, 0, -0.4323, 1.4415, -1.5564, 1.02, 10, vitesse_init, 1, 1, 1, 1]
+    X_bounds[0].min[:, 0] = [-0.3, 0, -0.4323, 1.4415, -1.5564, 1.02, -1, vitesse_init, -1, -1, -1, -1]
+    X_bounds[0].max[:, 0] = [0.3, 0, -0.4323, 1.4415, -1.5564, 1.02, 1, vitesse_init, 1, 1, 1, 1]
     X_bounds[0].min[1:3, 1] = [-1.2, -0.5]
     X_bounds[0].max[1:3, 1] = [0, 0.5]
     X_bounds[0].min[1:3, 2] = [-1.2, -0.5]
     X_bounds[0].max[1:3, 2] = [0, 0.5]
 
-    X_bounds[0].min[7:8, 1] = [-15]
+    X_bounds[0].min[7:8, 1] = [vitesse_init]
     X_bounds[0].max[7:8, 1] = [0]
     X_bounds[0].min[7:8, 2] = [0]
     X_bounds[0].max[7:8, 2] = [0]
@@ -275,8 +275,10 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
         seed=i_rand,
     )
     )
-
+    #position jambe z
     x_init[0].init[1, :] = np.linspace(-0.1, -1, 51)
+    #vitesse jambe z
+    x_init[0].init[7:8, :] = np.linspace(-vitesse_init, 0, 51)
 
     u_init = InitialGuessList()
     u_init.add(NoisedInitialGuess(
@@ -337,7 +339,7 @@ if __name__ == "__main__":
 
     Salto1 = 1
     Salto2 = 1
-    weight = 1000000
+    weight = 1000
     i_rand = 10
 
     # ----------------------------------------------- Sauteur_8 --------------------------------------------------------
