@@ -9,6 +9,7 @@ import casadi as cas
 import biorbd_casadi as biorbd
 import os
 import matplotlib.pyplot as plt
+import pickle
 from datetime import date
 
 from bioptim import (
@@ -212,6 +213,10 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
     objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE, key="q", phase=0, node=Node.START, index=1, weight=100,
                             target=np.zeros((1, 1)))
 
+    # maximiser la vitesse de départ
+    # objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_COM_VELOCITY, phase=0, node=Node.START, weight=1000,
+    #                         quadratic=False, axes=Axis.Z)
+
     # # Dynamics
     dynamics = DynamicsList()
     dynamics = Dynamics(custom_configure, dynamic_function=custom_dynamic)
@@ -219,7 +224,7 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
     # --- Constraints --- #
     constraints = ConstraintList()
 
-    # Constraint arm positivity
+    # Constraint time
     constraints.add(ConstraintFcn.TIME_CONSTRAINT, node=Node.END, min_bound=0.05, max_bound=0.6, phase=0)
 
 
@@ -352,7 +357,7 @@ if __name__ == "__main__":
                                 lut_horizontale=lut_horizontale, weight=weight, Salto1=Salto1, Salto2=Salto2, )
 
     solver = Solver.IPOPT(show_online_optim=True, show_options=dict(show_bounds=True))
-    solver.set_maximum_iterations(1000000)
+    solver.set_maximum_iterations(100000)
     solver.set_tol(1e-3)
     solver.set_constr_viol_tol(1e-3)
     solver.set_linear_solver("ma57")
@@ -378,6 +383,15 @@ if __name__ == "__main__":
     b = bioviz.Viz(model_path)
     b.load_movement(q)
     b.exec()
+
+
+    path = '/home/lim/Documents/Jules/result_saut/' + 'phase0_avec_vitesse_init' + '.pkl'
+    with open(path, 'wb') as file:
+        pickle.dump(q, file)
+        pickle.dump(qdot, file)
+        pickle.dump(u, file)
+        pickle.dump(t, file)
+
 
     Q_sym = cas.MX.sym("Q_sym", biorbd.Model(model_path).nbQ(), 1)
     custom_spring_const_post_func = custom_spring_const_post(Q_sym, lut_verticale, lut_horizontale, model_path)
