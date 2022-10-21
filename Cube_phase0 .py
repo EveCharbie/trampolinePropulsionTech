@@ -51,9 +51,9 @@ def custom_dynamic(states, controls, parameters, nlp):
     Marker_pied = Markers[0].to_mx()
 
 ############### f contact  ######################
-    Force = cas.MX.zeros(3)
-    Force[1] = lut_horizontale(Marker_pied[1:])
-    Force[2] = lut_verticale(Marker_pied[1:])
+    Force = cas.MX.zeros(2)
+    Force[0] = lut_horizontale(Marker_pied[1:])
+    Force[1] = lut_verticale(Marker_pied[1:])
 
     count = 0
     f_contact_vec = biorbd.VecBiorbdVector()
