@@ -11,6 +11,7 @@ import os
 import matplotlib.pyplot as plt
 from datetime import date
 from IPython import embed
+import pickle
 
 from bioptim import (
     Node,
@@ -49,6 +50,7 @@ def custom_dynamic(states, controls, parameters, nlp):
     Markers = nlp.model.markers(q)
     Marker_pied = Markers[0].to_mx()
 
+############### f contact  ######################
     Force = cas.MX.zeros(3)
     Force[1] = lut_horizontale(Marker_pied[1:])
     Force[2] = lut_verticale(Marker_pied[1:])
@@ -62,20 +64,25 @@ def custom_dynamic(states, controls, parameters, nlp):
         f_contact_vec.append(Force[idx])
         count = count + n_f_contact
 
-    f_ext = biorbd.VecBiorbdSpatialVector()
-    f_ext.append(biorbd.SpatialVector(np.array([0, 0, 0, 0, 0, 0])))
-    qddot = nlp.model.ForwardDynamics(q, qdot, tau, None, f_contact_vec).to_mx()
-
-#########################test f ext###############
-    # force_vector = cas.MX.zeros(6)
-    # force_vector[4] = lut_horizontale(Marker_pied[1:])
-    # force_vector[5] = lut_verticale(Marker_pied[1:])
-    #
-    # f_ext = biorbd.VecBiorbdSpatialVector()
-    # f_ext.append(biorbd.SpatialVector(force_vector))
-    # qddot = nlp.model.ForwardDynamics(q, qdot, tau, f_ext).to_mx()
+    qddot1 = nlp.model.ForwardDynamics(q, qdot, tau, None, f_contact_vec).to_mx()
 ##################################################
+#########################test f ext###############
+    #attention : la force est dans le repere globale, il faut donc la mettre dans le repere locale de la masse ponctuelle en ajoutant le moment associé
 
+    force_vector = cas.MX.zeros(6)
+    force_vector[4] = lut_horizontale(Marker_pied[1:]) #dans le global
+    force_vector[5] = lut_verticale(Marker_pied[1:])  #dans le global
+
+    force_vector[0] = q[0]*force_vector[5] - q[1]*force_vector[4]
+
+    f_ext = biorbd.VecBiorbdSpatialVector()
+    f_ext.append(biorbd.SpatialVector(force_vector))
+    qddot = nlp.model.ForwardDynamics(q, qdot, tau, f_ext).to_mx()
+##################################################
+    # f_evalext = cas.Function("qddot", [q, qdot, tau, f_ext], [qddot])
+    # f_evalcontact = cas.Function("qddot1", [q, qdot, tau, None, f_contact_vec], [qddot1])
+    # ext = cas.evalf(f_evalext)
+    # cont = cas.evalf(f_evalcontact)
 
     return DynamicsEvaluation(dxdt=cas.vertcat(qdot, qddot), defects=None)
 
@@ -85,7 +92,6 @@ def custom_configure(ocp: OptimalControlProgram, nlp: NonLinearProgram):
     ConfigureProblem.configure_qdot(nlp, as_states=True, as_controls=False)
     ConfigureProblem.configure_tau(nlp, as_states=False, as_controls=True)
     ConfigureProblem.configure_dynamics_function(ocp, nlp, custom_dynamic, expand=False)
-
 
 def custom_spring_const(pn: PenaltyNode, lut_verticale, lut_horizontale) -> cas.MX: #ajout de la force de la toile comme etant la force appliquee a la cheville
 
@@ -106,6 +112,15 @@ def custom_spring_const(pn: PenaltyNode, lut_verticale, lut_horizontale) -> cas.
     val_contrainte = cas.Function("Force", [pn.nlp.states['q'].mx, pn.nlp.controls['tau'].mx], [return_value])(pn.nlp.states['q'].cx, pn.nlp.controls['tau'].cx)
 
     return val_contrainte
+
+def custom_spring_const_post(Q, lut_verticale, lut_horizontale, model_path): #calcul de la force de la toile sur la cheville apres optim pour pouvoir comparer
+    m = biorbd.Model(model_path)
+    Marker_pied = m.markers(Q)[0].to_mx()
+    Force = cas.MX.zeros(3)
+    Force[1] = lut_horizontale(Marker_pied[1:])
+    Force[2] = lut_verticale(Marker_pied[1:])
+    fun = cas.Function("Force_TrampoBed", [Q], [Marker_pied, Force])
+    return fun
 
 def q_cheville_func(Q):
     q_mod = cas.fmod(Q, 2 * np.pi)
@@ -236,25 +251,25 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
     #                 min_bound=-2, max_bound=2, phase=0)
 
     # Constraint
-    constraints.add(ConstraintFcn.TIME_CONSTRAINT, node=Node.END, min_bound=0.05, max_bound=0.8, phase=0)
+    constraints.add(ConstraintFcn.TIME_CONSTRAINT, node=Node.END, min_bound=0.05, max_bound=0.3, phase=0)
 
     # Path constraint
     X_bounds = BoundsList()
 
-    vitesse_de_depart = np.sqrt(2 * 9.81 * 8)  # 2*g*hauteur_saut
+    vitesse_de_depart = -20 #np.sqrt(2 * 9.81 * 8)  # 2*g*hauteur_saut
 
     X_bounds.add(bounds=QAndQDotBounds(biorbd_model))
     X_bounds[0].min[:1, 1:] = [-0.3]
     X_bounds[0].max[:1, 1:] = [0.3]
 
-    X_bounds[0].min[:, 0] = [-0.3, 0, -0.5,  -1, -12, -1]
-    X_bounds[0].max[:, 0] = [0.3, 0, 0.5, 1, -12, 1]
-    X_bounds[0].min[1:3, 1] = [-6, -0.5]
+    X_bounds[0].min[:, 0] = [-0.3, 0, -0.5,  -1, vitesse_de_depart, -1]
+    X_bounds[0].max[:, 0] = [0.3, 0, 0.5, 1, 0, 1]
+    X_bounds[0].min[1:3, 1] = [-1.2, -0.5]
     X_bounds[0].max[1:3, 1] = [0, 0.5]
-    X_bounds[0].min[1:3 ,2] = [-6, -0.5]
+    X_bounds[0].min[1:3 ,2] = [-1.2, -0.5]
     X_bounds[0].max[1:3, 2] = [0, 0.5]
 
-    X_bounds[0].min[4:5, 1] = [-vitesse_de_depart]
+    X_bounds[0].min[4:5, 1] = [vitesse_de_depart]
     X_bounds[0].max[4:5, 1] = [0]
     X_bounds[0].min[4:5, 2] = [0]
     X_bounds[0].max[4:5, 2] = [0]
@@ -280,6 +295,8 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
     )
     #position
     x_init[0].init[1, :] = np.linspace(0, -1.2, 51)
+    # vitesse jambe z
+    x_init[0].init[4:5, :] = np.linspace(-vitesse_de_depart, 0, 51)
 
     u_init = InitialGuessList()
     u_init.add(NoisedInitialGuess(
@@ -354,7 +371,7 @@ if __name__ == "__main__":
     sol = ocp.solve(solver)
 
     toc = time() - tic
-    print(f"Time to solve weight={weight}, random={i_rand}: {toc}sec")
+    print(f"Time to solve (weight={weight}, random={i_rand}): {toc} sec")
 
     q = ocp.nlp[0].variable_mappings["q"].to_second.map(sol.states["q"])
     qdot = ocp.nlp[0].variable_mappings["qdot"].to_second.map(sol.states["qdot"])
@@ -370,6 +387,54 @@ if __name__ == "__main__":
 
     model_path = "/home/lim/Documents/Jules/bioptim/bioptim/examples/getting_started/models/cube.bioMod"
 
+    # path = '/home/lim/Documents/Jules/result_saut/' + 'cube_phase0_fcontact' + '.pkl'
+    # with open(path, 'wb') as file:
+    #     pickle.dump(q, file)
+    #     pickle.dump(qdot, file)
+    #     pickle.dump(u, file)
+    #     pickle.dump(t, file)
+
     b = bioviz.Viz(model_path)
     b.load_movement(q)
     b.exec()
+
+
+    #avec toile
+    #
+    # Q_sym = cas.MX.sym("Q_sym", biorbd.Model(model_path).nbQ(), 1)
+    # custom_spring_const_post_func = custom_spring_const_post(Q_sym, lut_verticale, lut_horizontale, model_path)
+    #
+    # Marker_pied = np.zeros((3, np.shape(q)[1]))
+    # Force_toile = np.zeros((3, np.shape(q)[1]))
+    # for j in range(np.shape(q)[1]):
+    #     Marker_pied_tempo, Force_toile_tempo = custom_spring_const_post_func(q[:, j])
+    #     Marker_pied[:, j] = np.reshape(Marker_pied_tempo, (3))
+    #     Force_toile[:, j] = np.reshape(Force_toile_tempo, (3))
+    #
+    # DirertoryFlies = os.listdir("/home/lim/Documents/Jules/code_initiaux_Eve/Position_massPoints")
+    # q_toile = np.zeros((15 * 3, np.shape(q)[1]))
+    # for j in range(np.shape(q)[1]):
+    #     BestFileIndex = 0
+    #     BestFileNum = 1000
+    #     for iFile in range(len(DirertoryFlies)):
+    #         if "y" in DirertoryFlies[iFile]:
+    #             first_ = DirertoryFlies[iFile].index("_")
+    #             firsty = DirertoryFlies[iFile].index("y")
+    #             yy = float(DirertoryFlies[iFile][first_ + 1: firsty])
+    #             second_ = DirertoryFlies[iFile][first_ + 1:].index("_")
+    #             firstz = DirertoryFlies[iFile].index("z")
+    #             zz = float(DirertoryFlies[iFile][first_ + 1 + second_ + 1: firstz])
+    #             if (abs(yy - Marker_pied[1, j]) + abs(zz - Marker_pied[2, j])) < BestFileNum:
+    #                 BestFileNum = abs(yy - Marker_pied[1, j]) + abs(zz - Marker_pied[2, j])
+    #                 BestFileIndex = iFile
+    #                 yy_final = yy
+    #                 zz_final = zz
+    #
+    #         data = np.load(
+    #             f"/home/lim/Documents/Jules/code_initiaux_Eve/Position_massPoints/{DirertoryFlies[BestFileIndex]}"
+    #         )
+    #         q_toile[:, j] = data.T.flatten()
+    #
+    # b = bioviz.Viz("/home/lim/Documents/Jules/code_initiaux_Eve/collectesaut/jumper_sansPieds_rootPied_bioviz.bioMod")
+    # b.load_movement(np.vstack((q_toile, q)))
+    # b.exec()
