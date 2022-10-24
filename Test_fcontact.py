@@ -20,19 +20,19 @@ from bioptim import (
 model = biorbd.Model('/home/lim/Documents/Jules/cube.bioMod')
 model1 = biorbd.Model('/home/lim/Documents/Jules/cube_nocontact.bioMod')
 
-# q = np.array([1, 2, 4]) # np.random.rand(3,1)
-# qdot = np.array([1, 2, 4]) # np.random.rand(3,1)
-# tau = np.array([1, 2, 4]) # np.random.rand(3,1)
+q = np.array([1, 2, 4]) # np.random.rand(3,1)
+qdot = np.array([1, 2, 6]) # np.random.rand(3,1)
+tau = np.array([1, 3, 4]) # np.random.rand(3,1)
 
-q = np.array([0, 0, 0]) # np.random.rand(3,1)
-qdot = np.array([0, 0, 0]) # np.random.rand(3,1)
-tau = np.array([0, 0, 0]) # np.random.rand(3,1)
+# q = np.array([0, 0, 0]) # np.random.rand(3,1)
+# qdot = np.array([0, 0, 0]) # np.random.rand(3,1)
+# tau = np.array([0, 0, 0]) # np.random.rand(3,1)
 
 ############### f contact  ######################
-Force = np.zeros((3, 1))
-Force[1] = 10
-Force[2] = 0
-Force = np.reshape(Force, (3,))
+Force = np.zeros((2, 1))
+Force[0] = 10
+Force[1] = 500
+Force = np.reshape(Force, (2,))
 
 count = 0
 f_contact_vec = biorbd.VecBiorbdVector()
@@ -43,35 +43,14 @@ for ii in range(1):
     f_contact_vec.append(Force[idx])
     count = count + n_f_contact
 
-# Force_y = np.zeros((3, 1))
-# Force_y[1] = 10
-# Force_y = np.reshape(Force_y, (3,))
-#
-# Force_z = np.zeros((3, 1))
-# Force_z[2] = 500
-# Force_z = np.reshape(Force_z, (3,))
-#
-# Force = [Force_y, Force_z]
-#
-# count = 0
-# f_contact_vec = biorbd.VecBiorbdVector()
-# n_f_contact = 1
-# nb_contacts = 2
-# idx = [1, 2]
-#
-# for ii in range(nb_contacts):
-#     f_contact_vec.append(Force[ii]) # [idx[ii]]
-#     count = count + n_f_contact
-#
-#
-
-#########################test f ext###############
+############test f ext#############################
 force_vector = np.zeros((6, 1))
-force_vector[4] = 0 #74
-force_vector[5] = 0 #733.75
-force_vector[0] = 0#q[0]*force_vector[5] - q[1]*force_vector[4]
-f_ext = biorbd.to_spatial_vector(force_vector)
 
+force_vector[4] = 10
+force_vector[5] = 500
+force_vector[0] = q[0]*force_vector[5] - q[1]*force_vector[4]
+f_ext = biorbd.to_spatial_vector(force_vector)
+###################################################
 
 q = np.reshape(q, (3,))
 qdot = np.reshape(qdot, (3,))
