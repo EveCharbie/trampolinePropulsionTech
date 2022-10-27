@@ -416,9 +416,9 @@ if __name__ == "__main__":
         # verification rang de la jacobienne
         rang = np.linalg.matrix_rank(jacobienne)
 
-        if rang == len(ocp.nlp[0].g):
+        if rang == len(ocp.nlp[phase].g):
             print('Phase ' + str(phase) + ' : contraintes ok')
-        if rang != len(ocp.nlp[0].g):
+        if rang != len(ocp.nlp[phase].g):
             print('Phase ' + str(phase) + ' : contraintes mal définies')
 
     #####################
