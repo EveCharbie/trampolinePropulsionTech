@@ -363,6 +363,50 @@ if __name__ == "__main__":
     ocp = prepare_ocp_back_back(path_model_cheville=path_model_cheville, lut_verticale=lut_verticale,
                                 lut_horizontale=lut_horizontale, weight=weight, Salto1=Salto1, Salto2=Salto2, )
 
+    ##########################
+    ###verif ocp contrainte###
+    ##########################
+    for phase in range (0,len(ocp.nlp)):
+        jacobienne_cas = cas.MX()
+        liste_contrainte = []
+        for i in range (0,len(ocp.nlp[phase].g)):
+            for axe in range (0, ocp.nlp[phase].g[i].function(ocp.nlp[phase].states.cx, ocp.nlp[phase].controls.cx, ocp.nlp[phase].parameters.cx).shape[0]):
+                liste_contrainte.append(cas.jacobian(
+                    ocp.nlp[phase].g[i].function(ocp.nlp[phase].states.cx, ocp.nlp[phase].controls.cx, ocp.nlp[phase].parameters.cx)[axe],
+                    cas.vertcat(*ocp.nlp[phase].X, *ocp.nlp[phase].U, ocp.nlp[phase].parameters.cx)))
+
+        jacobienne_cas = cas.vcat(liste_contrainte).T
+
+        jac_func = cas.Function("jacobienne", [cas.vertcat(*ocp.nlp[phase].X, *ocp.nlp[phase].U, ocp.nlp[phase].parameters.cx)], [jacobienne_cas])
+
+        #evaluation jac_func en X_init, U_init
+
+        X_init = np.zeros((len(ocp.nlp[phase].X), ocp.nlp[phase].x_init.shape[0]))
+        U_init = np.zeros((len(ocp.nlp[phase].U), ocp.nlp[phase].u_init.shape[0]))
+
+        for n_shooting in range (0,ocp.nlp[phase].ns+1):
+            X_init[n_shooting, :] = np.array(ocp.nlp[phase].x_init.init.evaluate_at(n_shooting))
+        for n_shooting in range (0,ocp.nlp[phase].ns):
+            U_init[n_shooting, :] = np.array(ocp.nlp[phase].u_init.init.evaluate_at(n_shooting))
+
+        X_init = X_init.reshape((X_init.size, 1))
+        U_init = U_init.reshape((U_init.size, 1))
+        Param_init = np.array(ocp.nlp[0].parameters.initial_guess.init)
+
+        jacobienne = np.array(jac_func(np.vstack((X_init, U_init, Param_init))))
+
+        #verification rang de la jacobienne
+        rang = np.linalg.matrix_rank(jacobienne)
+
+        if rang == len(ocp.nlp[0].g):
+            print('Phase ' + str(phase) + ' : contraintes ok')
+        if rang != len(ocp.nlp[0].g):
+            print('Phase ' + str(phase) + ' : contraintes mal définies')
+
+    #####################
+    #####################
+    #####################
+
     solver = Solver.IPOPT(show_online_optim=True, show_options=dict(show_bounds=True))
     solver.set_maximum_iterations(100000)
     solver.set_tol(1e-3)
@@ -387,12 +431,12 @@ if __name__ == "__main__":
 
     model_path = "/home/lim/Documents/Jules/bioptim/bioptim/examples/getting_started/models/cube.bioMod"
 
-    # path = '/home/lim/Documents/Jules/result_saut/' + 'cube_phase0_fcontact' + '.pkl'
-    # with open(path, 'wb') as file:
-    #     pickle.dump(q, file)
-    #     pickle.dump(qdot, file)
-    #     pickle.dump(u, file)
-    #     pickle.dump(t, file)
+    path = '/home/lim/Documents/Jules/result_saut/' + 'cube_phase0_coherent_ok' + '.pkl'
+    with open(path, 'wb') as file:
+        pickle.dump(q, file)
+        pickle.dump(qdot, file)
+        pickle.dump(u, file)
+        pickle.dump(t, file)
 
     b = bioviz.Viz(model_path)
     b.load_movement(q)
