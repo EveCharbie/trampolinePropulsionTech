@@ -444,11 +444,6 @@ if __name__ == "__main__":
     ##############################################################################################################################
     import bioviz
 
-    model_path = "/home/lim/Documents/Jules/code_initiaux_Eve/collectesaut/SylvainMan_Sauteur_6DoF.bioMod"
-
-    b = bioviz.Viz(model_path)
-    b.load_movement(q)
-    b.exec()
 
 
     path = '/home/lim/Documents/Jules/result_saut/' + 'phase0_sauteur_contact_jambe_v_init' + '.pkl'
@@ -457,6 +452,12 @@ if __name__ == "__main__":
         pickle.dump(qdot, file)
         pickle.dump(u, file)
         pickle.dump(t, file)
+
+    model_path = "/home/lim/Documents/Jules/code_initiaux_Eve/collectesaut/SylvainMan_Sauteur_6DoF.bioMod"
+
+    b = bioviz.Viz(model_path)
+    b.load_movement(q)
+    b.exec()
 
 
     Q_sym = cas.MX.sym("Q_sym", biorbd.Model(model_path).nbQ(), 1)

@@ -512,7 +512,7 @@ if __name__ == "__main__":
 
     model_path = "/home/lim/Documents/Jules/code_initiaux_Eve/collectesaut/SylvainMan_Sauteur_6DoF.bioMod"
 
-    path = '/home/lim/Documents/Jules/result_saut/' + 'phase0/1_sauteur' + '.pkl'
+    path = '/home/lim/Documents/Jules/result_saut/' + 'phase01_sauteur' + '.pkl'
     with open(path, 'wb') as file:
         pickle.dump(q, file)
         pickle.dump(qdot, file)
