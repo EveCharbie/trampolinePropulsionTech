@@ -9,9 +9,13 @@ import casadi as cas
 import biorbd_casadi as biorbd
 import os
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
+import matplotlib.cm as mcm
 from datetime import date
-from IPython import embed
 import pickle
+
+# import sys
+# sys.path.append("/home/lim/Documents/Jules/bioptim")
 
 from bioptim import (
     Node,
@@ -214,7 +218,7 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
     )
 
     final_time = (
-        0.1,
+        0.15,
     )
 
     tau_min, tau_max, tau_init = -10000, 10000, 0
@@ -240,39 +244,30 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
 
     # --- Constraints --- #
     constraints = ConstraintList()
-    # constraints.add(
-    #     tau_actuator_constraints_min, phase=0, node=Node.ALL, minimal_tau=50, path_model_cheville=path_model_cheville,
-    #     min_bound=-np.inf, max_bound=0)
-    # constraints.add(
-    #     tau_actuator_constraints_max, phase=0, node=Node.ALL, minimal_tau=50, path_model_cheville=path_model_cheville,
-    #     min_bound=-np.inf, max_bound=0)
-
-    # constraints.add(custom_spring_const, lut_verticale=lut_verticale, lut_horizontale=lut_horizontale, node=Node.ALL,
-    #                 min_bound=-2, max_bound=2, phase=0)
 
     # Constraint
-    constraints.add(ConstraintFcn.TIME_CONSTRAINT, node=Node.END, min_bound=0.05, max_bound=0.3, phase=0)
+    constraints.add(ConstraintFcn.TIME_CONSTRAINT, node=Node.END, min_bound=0.08, max_bound=0.3, phase=0)
 
     # Path constraint
     X_bounds = BoundsList()
 
-    vitesse_de_depart = -20 #np.sqrt(2 * 9.81 * 8)  # 2*g*hauteur_saut
 
     X_bounds.add(bounds=QAndQDotBounds(biorbd_model))
     X_bounds[0].min[:1, 1:] = [-0.3]
     X_bounds[0].max[:1, 1:] = [0.3]
 
-    X_bounds[0].min[:, 0] = [-0.3, 0, -0.5,  -1, vitesse_de_depart, -1]
-    X_bounds[0].max[:, 0] = [0.3, 0, 0.5, 1, 0, 1]
+    X_bounds[0].min[:, 0] = [-0.3, 0, -0.5,  -1, -20, -1]
+    X_bounds[0].max[:, 0] = [0.3, 0.5, 0.5, 1, 20, 1]
     X_bounds[0].min[1:3, 1] = [-1.2, -0.5]
-    X_bounds[0].max[1:3, 1] = [0, 0.5]
+    X_bounds[0].max[1:3, 1] = [0.5, 0.5]
     X_bounds[0].min[1:3 ,2] = [-1.2, -0.5]
-    X_bounds[0].max[1:3, 2] = [0, 0.5]
+    X_bounds[0].max[1:3, 2] = [0.5, 0.5]
 
-    X_bounds[0].min[4:5, 1] = [vitesse_de_depart]
-    X_bounds[0].max[4:5, 1] = [0]
+    X_bounds[0].min[4:5, 1] = [-20]
+    X_bounds[0].max[4:5, 1] = [20]
     X_bounds[0].min[4:5, 2] = [0]
     X_bounds[0].max[4:5, 2] = [0]
+
 
     # Define control path constraint
     u_bounds = BoundsList()
@@ -287,16 +282,16 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
     x_init.add(NoisedInitialGuess(
         [0,0,0,0,0,0],  # (nq + nqdot)
         bounds=X_bounds[0],
-        noise_magnitude=0.2,
+        noise_magnitude=0.5,
         n_shooting=number_shooting_points[0],
         bound_push=0.01,
         seed=i_rand,
     )
     )
-    #position
-    x_init[0].init[1, :] = np.linspace(0, -1.2, 51)
-    # vitesse jambe z
-    x_init[0].init[4:5, :] = np.linspace(-vitesse_de_depart, 0, 51)
+    # #position
+    # x_init[0].init[1,:] = np.linspace(0, -1.2, 51)
+    # # vitesse jambe z
+    x_init[0].init[4:5, :] = np.linspace(-20, 0, 51)
 
     u_init = InitialGuessList()
     u_init.add(NoisedInitialGuess(
@@ -363,67 +358,6 @@ if __name__ == "__main__":
     ocp = prepare_ocp_back_back(path_model_cheville=path_model_cheville, lut_verticale=lut_verticale,
                                 lut_horizontale=lut_horizontale, weight=weight, Salto1=Salto1, Salto2=Salto2, )
 
-    ##########################
-    ###verif ocp contrainte###
-    ##########################
-    for phase in range(0, len(ocp.nlp)):
-        jacobienne_cas = cas.MX()
-        liste_contrainte = []
-        for i in range(0, len(ocp.nlp[phase].g)):
-            for axe in range(0, ocp.nlp[phase].g[i].function(ocp.nlp[phase].states.cx, ocp.nlp[phase].controls.cx,
-                                                             ocp.nlp[phase].parameters.cx).shape[0]):
-
-                # gerer les parametres
-                if (ocp.nlp[phase].parameters.shape == 0) == True:
-                    liste_contrainte.append(cas.jacobian(
-                        ocp.nlp[phase].g[i].function(ocp.nlp[phase].states.cx, ocp.nlp[phase].controls.cx,
-                                                     ocp.nlp[phase].parameters.cx)[axe],
-                        cas.vertcat(*ocp.nlp[phase].X, *ocp.nlp[phase].U, ocp.nlp[phase].parameters.cx)))
-                else:
-                    liste_contrainte.append(cas.jacobian(
-                        ocp.nlp[phase].g[i].function(ocp.nlp[phase].states.cx, ocp.nlp[phase].controls.cx,
-                                                     ocp.nlp[phase].parameters.cx)[axe],
-                        cas.vertcat(*ocp.nlp[phase].X, *ocp.nlp[phase].U, *[ocp.nlp[phase].parameters.cx])))
-
-        jacobienne_cas = cas.vcat(liste_contrainte).T
-
-        # gerer les parametres
-        if (ocp.nlp[phase].parameters.shape == 0) == True:
-            jac_func = cas.Function("jacobienne",
-                                    [cas.vertcat(*ocp.nlp[phase].X, *ocp.nlp[phase].U, ocp.nlp[phase].parameters.cx)],
-                                    [jacobienne_cas])
-        else:
-            jac_func = cas.Function("jacobienne",
-                                    [cas.vertcat(*ocp.nlp[phase].X, *ocp.nlp[phase].U, *[ocp.nlp[phase].parameters.cx])],
-                                    [jacobienne_cas])
-
-        # evaluation jac_func en X_init, U_init
-
-        X_init = np.zeros((len(ocp.nlp[phase].X), ocp.nlp[phase].x_init.shape[0]))
-        U_init = np.zeros((len(ocp.nlp[phase].U), ocp.nlp[phase].u_init.shape[0]))
-        Param_init = np.array(ocp.nlp[phase].parameters.initial_guess.init)
-
-        for n_shooting in range(0, ocp.nlp[phase].ns + 1):
-            X_init[n_shooting, :] = np.array(ocp.nlp[phase].x_init.init.evaluate_at(n_shooting))
-        for n_shooting in range(0, ocp.nlp[phase].ns):
-            U_init[n_shooting, :] = np.array(ocp.nlp[phase].u_init.init.evaluate_at(n_shooting))
-
-        X_init = X_init.reshape((X_init.size, 1))
-        U_init = U_init.reshape((U_init.size, 1))
-
-        jacobienne = np.array(jac_func(np.vstack((X_init, U_init, Param_init))))
-
-        # verification rang de la jacobienne
-        rang = np.linalg.matrix_rank(jacobienne)
-
-        if rang == len(ocp.nlp[phase].g):
-            print('Phase ' + str(phase) + ' : contraintes ok')
-        if rang != len(ocp.nlp[phase].g):
-            print('Phase ' + str(phase) + ' : contraintes mal définies')
-
-    #####################
-    #####################
-    #####################
 
     solver = Solver.IPOPT(show_online_optim=True, show_options=dict(show_bounds=True))
     solver.set_maximum_iterations(100000)
