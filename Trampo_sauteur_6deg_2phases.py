@@ -75,16 +75,16 @@ def custom_configure(ocp: OptimalControlProgram, nlp: NonLinearProgram):
 
 def CoM_base_appui(pn: PenaltyNode) -> cas.MX:#centre de masse au dessus de la point de contatc avec la toile, pour rester debout, a ajouter dans contrainte
     val_contrainte = []
-    nq = int(pn.nlp.cx / 2)
-    q_i = pn.nlp.phase_mapping["q"].to_second.map(pn.x[:nq])  # pn.x[i][:nq]
-    CoM = pn.nlp.model.CoM(q_i).to_mx()
-    q_pied_y = q_i[0]
-    CoM_proj = CoM[1]
-    val_contrainte = cas.vertcat(val_contrainte, CoM_proj - q_pied_y)
+    q = pn.nlp.states['q'].mx
+    q_pied_y = q[0]
+    CoM = pn.nlp.model.CoM(q).to_mx()
+    CoM_proj = CoM[1] #sur y
+    val_contrainte = BiorbdInterface.mx_to_cx("COM_position_constraint", CoM_proj - q_pied_y, pn.nlp.states["q"])
+
     return val_contrainte
 
 
-def Non_trans_toile(pn: PenaltyNode) -> cas.MX:#maraueurs du pied et de la hanche toujours au dessus du pied
+def Non_trans_toile(pn: PenaltyNode) -> cas.MX:#marqueurs du pied et de la hanche toujours au dessus du pied
     val_contrainte = []
     nq = int(pn.nlp.cx / 2)
     q_i = pn.nlp.phase_mapping["q"].to_second.map(pn.x[:nq])  # pn.x[i][:nq]
@@ -237,6 +237,10 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
     # --- Constraints --- #
     constraints = ConstraintList()
 
+    # centre de massee contraint sur y
+    constraints.add(CoM_base_appui, node=Node.ALL, min_bound=-0.7, max_bound=0.7, phase=0)
+    constraints.add(CoM_base_appui, node=Node.ALL, min_bound=-0.7, max_bound=0.7, phase=1)
+
     # Constraint time
     constraints.add(ConstraintFcn.TIME_CONSTRAINT, node=Node.END, min_bound=0.05, max_bound=0.6, phase=0)
     constraints.add(ConstraintFcn.TIME_CONSTRAINT, node=Node.END, min_bound=0.05, max_bound=0.6, phase=1)
@@ -274,6 +278,9 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
     X_bounds[0].min[1:3, 2] = [-1.2, -0.5]
     X_bounds[0].max[1:3, 2] = [0, 0.5]
 
+    X_bounds[0].min[3, :] = [0, 0, 0]
+    X_bounds[0].max[3, :] = [2.9, 2.9, 2.9]
+
     X_bounds[0].min[7:8, 1] = [vitesse_init]
     X_bounds[0].max[7:8, 1] = [0]
     X_bounds[0].min[7:8, 2] = [0]
@@ -292,6 +299,9 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
     X_bounds[1].max[1:3, 1] = [0, 0.5]
     X_bounds[1].min[:3, 2] = [-0.5, -0.5, -0.5]
     X_bounds[1].max[:3, 2] = [0.5, 0.5, 0.5]
+
+    X_bounds[1].min[3, :] = [0, 0, 0]
+    X_bounds[1].max[3, :] = [2.9, 2.9, 2.9]
 
     X_bounds[1].min[7:8, 0] = [0]
     X_bounds[1].max[7:8, 0] = [0]
@@ -347,7 +357,7 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
     u_init.add(NoisedInitialGuess(
             [0] * 6, # ntorque
             bounds=u_bounds[0],
-            noise_magnitude=0.01,
+            noise_magnitude=0.001,
             n_shooting=number_shooting_points[0]-1,
             bound_push=0.1,
             seed=i_rand,
@@ -356,7 +366,7 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
     u_init.add(NoisedInitialGuess(
             [0] * 6,
             bounds=u_bounds[1],
-            noise_magnitude=0.01,
+            noise_magnitude=0.001,
             n_shooting=number_shooting_points[1]-1,
             bound_push=0.1,
             seed=i_rand,
@@ -373,7 +383,7 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
         u_bounds=u_bounds,
         objective_functions=objective_functions,
         constraints=constraints,
-        n_threads=4,
+        n_threads=3,
     )
     return ocp
 
@@ -422,71 +432,6 @@ if __name__ == "__main__":
     tic = time()
     ocp = prepare_ocp_back_back(path_model_cheville=path_model_cheville,lut_verticale=lut_verticale,lut_horizontale=lut_horizontale,weight=weight,Salto1=Salto1,Salto2=Salto2,)
 
-    ##########################
-    ###verif ocp contrainte###
-    ##########################
-    for phase in range(0, len(ocp.nlp)):
-        jacobienne_cas = cas.MX()
-        liste_contrainte = []
-        for i in range(0, len(ocp.nlp[phase].g)):
-            for axe in range(0, ocp.nlp[phase].g[i].function(ocp.nlp[phase].states.cx, ocp.nlp[phase].controls.cx,
-                                                             ocp.nlp[phase].parameters.cx).shape[0]):
-
-                # gerer les parametres
-                if (ocp.nlp[phase].parameters.shape == 0) == True:
-                    liste_contrainte.append(cas.jacobian(
-                        ocp.nlp[phase].g[i].function(ocp.nlp[phase].states.cx, ocp.nlp[phase].controls.cx,
-                                                     ocp.nlp[phase].parameters.cx)[axe],
-                        cas.vertcat(*ocp.nlp[phase].X, *ocp.nlp[phase].U, ocp.nlp[phase].parameters.cx)))
-                else:
-                    liste_contrainte.append(cas.jacobian(
-                        ocp.nlp[phase].g[i].function(ocp.nlp[phase].states.cx, ocp.nlp[phase].controls.cx,
-                                                     ocp.nlp[phase].parameters.cx)[axe],
-                        cas.vertcat(*ocp.nlp[phase].X, *ocp.nlp[phase].U, *[ocp.nlp[phase].parameters.cx])))
-
-        jacobienne_cas = cas.vcat(liste_contrainte).T
-
-        # gerer les parametres
-        if (ocp.nlp[phase].parameters.shape == 0) == True:
-            jac_func = cas.Function("jacobienne",
-                                    [cas.vertcat(*ocp.nlp[phase].X, *ocp.nlp[phase].U, ocp.nlp[phase].parameters.cx)],
-                                    [jacobienne_cas])
-        else:
-            jac_func = cas.Function("jacobienne",
-                                    [cas.vertcat(*ocp.nlp[phase].X, *ocp.nlp[phase].U,
-                                                 *[ocp.nlp[phase].parameters.cx])],
-                                    [jacobienne_cas])
-
-        # evaluation jac_func en X_init, U_init
-
-        X_init = np.zeros((len(ocp.nlp[phase].X), ocp.nlp[phase].x_init.shape[0]))
-        U_init = np.zeros((len(ocp.nlp[phase].U), ocp.nlp[phase].u_init.shape[0]))
-        Param_init = np.array(ocp.nlp[phase].parameters.initial_guess.init)
-
-        for n_shooting in range(0, ocp.nlp[phase].ns + 1):
-            X_init[n_shooting, :] = np.array(ocp.nlp[phase].x_init.init.evaluate_at(n_shooting))
-        for n_shooting in range(0, ocp.nlp[phase].ns):
-            U_init[n_shooting, :] = np.array(ocp.nlp[phase].u_init.init.evaluate_at(n_shooting))
-
-        X_init = X_init.reshape((X_init.size, 1))
-        U_init = U_init.reshape((U_init.size, 1))
-
-        jacobienne = np.array(jac_func(np.vstack((X_init, U_init, Param_init))))
-
-        # verification rang de la jacobienne
-        rang = np.linalg.matrix_rank(jacobienne)
-
-        if rang == len(ocp.nlp[phase].g):
-            print('Phase ' + str(phase) + ' : contraintes ok')
-        if rang != len(ocp.nlp[phase].g):
-            print('Phase ' + str(phase) + ' : contraintes mal définies')
-
-    #####################
-    #####################
-    #####################
-
-
-
 
     solver = Solver.IPOPT(show_online_optim=True, show_options=dict(show_bounds=True))
     solver.set_maximum_iterations(10000)
@@ -512,7 +457,7 @@ if __name__ == "__main__":
 
     model_path = "/home/lim/Documents/Jules/code_initiaux_Eve/collectesaut/SylvainMan_Sauteur_6DoF.bioMod"
 
-    path = '/home/lim/Documents/Jules/result_saut/' + 'phase01_sauteur' + '.pkl'
+    path = '/home/lim/Documents/Jules/result_saut/' + 'phase01_sauteur5' + '.pkl'
     with open(path, 'wb') as file:
         pickle.dump(q, file)
         pickle.dump(qdot, file)
