@@ -101,7 +101,7 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
 
     final_time = (
         0.15,
-        0.1,
+        0.15,
     )
 
     tau_min, tau_max, tau_init = -1, 1, 0
@@ -134,8 +134,8 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
     constraints.add(ConstraintFcn.TRACK_COM_VELOCITY, node=Node.START, min_bound=-20, max_bound=-5, phase=0, axes=Axis.Z)
     #
     # # Constraint time
-    constraints.add(ConstraintFcn.TIME_CONSTRAINT, node=Node.END, min_bound=0.02, max_bound=0.8, phase=0)
-    constraints.add(ConstraintFcn.TIME_CONSTRAINT, node=Node.END, min_bound=0.1, max_bound=0.9, phase=1)
+    constraints.add(ConstraintFcn.TIME_CONSTRAINT, node=Node.END, min_bound=0.08, max_bound=0.6, phase=0)
+    constraints.add(ConstraintFcn.TIME_CONSTRAINT, node=Node.END, min_bound=0.08, max_bound=0.6, phase=1)
 
     # Path constraint
     X_bounds = BoundsList()
