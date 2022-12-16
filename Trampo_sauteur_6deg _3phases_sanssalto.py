@@ -40,6 +40,7 @@ from bioptim import (
     BiorbdInterface,
     NonLinearProgram,
     ConfigureProblem,
+    BiMappingList,
 )
 
 def custom_dynamic(states, controls, parameters, nlp):
@@ -74,13 +75,11 @@ def custom_configure(ocp: OptimalControlProgram, nlp: NonLinearProgram):
     ConfigureProblem.configure_dynamics_function(ocp, nlp, custom_dynamic, expand=False)
 
 def CoM_base_appui(pn: PenaltyNode) -> cas.MX:#centre de masse au dessus de la point de contatc avec la toile, pour rester debout, a ajouter dans contrainte
-    val_contrainte = []
-    nq = int(pn.nlp.cx / 2)
-    q_i = pn.nlp.phase_mapping["q"].to_second.map(pn.x[:nq])  # pn.x[i][:nq]
-    CoM = pn.nlp.model.CoM(q_i).to_mx()
-    q_pied_y = q_i[0]
-    CoM_proj = CoM[1]
-    val_contrainte = cas.vertcat(val_contrainte, CoM_proj - q_pied_y)
+    q = pn.nlp.states['q'].mx
+    q_pied_y = q[0]
+    CoM = pn.nlp.model.CoM(q).to_mx()
+    CoM_proj = CoM[1]  # on garde sur y
+    val_contrainte = BiorbdInterface.mx_to_cx('Com_positionY_constraints', CoM_proj - q_pied_y, pn.nlp.states['q'])
     return val_contrainte
 
 
@@ -186,8 +185,8 @@ def tau_actuator_constraints_max(pn: PenaltyNode, path_model_cheville: str, mini
 
 def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale):
     # --- Options --- #
-    model_path = "/home/lim/Documents/Jules/code_initiaux_Eve/collectesaut/SylvainMan_Sauteur_6DoF.bioMod"
-    model_path_massToile = "/home/lim/Documents/Jules/code_initiaux_Eve/collectesaut/SylvainMan_Sauteur_6DoF_massToile.bioMod"
+    model_path = "/home/mickael/Documents/Jules/propulsion/collecte/SylvainMan_Sauteur_6DoF.bioMod"
+    model_path_massToile = "/home/mickael/Documents/Jules/propulsion/collecte/SylvainMan_Sauteur_6DoF_massToile.bioMod"
 
     # Model path
     biorbd_model = (
@@ -205,21 +204,29 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale):
     final_time = (
         0.15,
         0.15,
-        2,
+        1.5,
     )
 
-    tau_min, tau_max, tau_init = -10000, 10000, 0
+    tau_min, tau_max, tau_init = -500, 500, 1
 
     ### --- Add objective functions --- ###
     objective_functions = ObjectiveList()
-    objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE, key="q", node=Node.END, index=1, weight=10000, phase=0, quadratic=False) #etre le plus bas a la fin de la phase 0
-    objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_COM_VELOCITY, node=Node.END, weight=-10000, phase=1, quadratic=False, axes=Axis.Z) #maximiser la vitesse au moment du decollage
-    objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_COM_POSITION, node=Node.END, weight=-10000, phase=2, quadratic=False, axes=Axis.Z)# aller le plus haut
+    objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_COM_POSITION, node=Node.END, weight=1000, phase=0, quadratic=False) #etre le plus bas a la fin de la phase 0
+    objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_COM_VELOCITY, node=Node.END, weight=-1000, phase=1, quadratic=False, axes=Axis.Z) #maximiser la vitesse au moment du decollage
+    # objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_COM_POSITION, node=Node.MID, weight=-10000, phase=2, quadratic=False, axes=Axis.Z)# aller le plus haut
 
-    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", weight=1, phase=0, index=[2,3,4,5])
+    # objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", weight=1, phase=0, index=[2,3,4,5])
+    # objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", derivative=True, weight=100, phase=0)
+    # objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", weight=1, phase=1, index=[2,3,4,5])
+    # objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", derivative=True, weight=100, phase=1)
+    # objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", weight=1, phase=2, index=[2, 3, 4, 5])
+    # objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", derivative=True, weight=100, phase=2)
+    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", weight=1, phase=0)
     objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", derivative=True, weight=100, phase=0)
-    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", weight=1, phase=1, index=[2,3,4,5])
+    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", weight=1, phase=1)
     objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", derivative=True, weight=100, phase=1)
+    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", weight=1, phase=2)
+    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", derivative=True, weight=100, phase=2)
 
 
     # --- arriver avec les pieds au centre de la toile --- #
@@ -234,7 +241,8 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale):
     dynamics = DynamicsList()
     dynamics.add(Dynamics(custom_configure, dynamic_function=custom_dynamic))
     dynamics.add(Dynamics(custom_configure, dynamic_function=custom_dynamic))
-    dynamics.add(Dynamics(custom_configure, dynamic_function=custom_dynamic))
+    # dynamics.add(Dynamics(custom_configure, dynamic_function=custom_dynamic))
+    dynamics.add(DynamicsFcn.TORQUE_DRIVEN)
 
     # --- Constraints --- #
     constraints = ConstraintList()
@@ -242,10 +250,14 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale):
     # Constraint arm positivity
     constraints.add(ConstraintFcn.TIME_CONSTRAINT, node=Node.END, min_bound=0.08, max_bound=0.6, phase=0)
     constraints.add(ConstraintFcn.TIME_CONSTRAINT, node=Node.END, min_bound=0.08, max_bound=0.6, phase=1)
-    constraints.add(ConstraintFcn.TIME_CONSTRAINT, node=Node.END, min_bound=1, max_bound=3.5, phase=2)
+    constraints.add(ConstraintFcn.TIME_CONSTRAINT, node=Node.END, min_bound=0.5, max_bound=3.5, phase=2)
+
+    # constraint CoM above canva Y
+    # constraints.add(CoM_base_appui, node=Node.ALL, min_bound=-0.5, max_bound=0.5, phase=0)
+    # constraints.add(CoM_base_appui, node=Node.ALL, min_bound=-0.5, max_bound=0.5, phase=1)
 
     # initial velocity
-    constraints.add(ConstraintFcn.TRACK_COM_VELOCITY, node=Node.START, min_bound=-15, max_bound=-10, phase=0, axes=Axis.Z)
+    # constraints.add(ConstraintFcn.TRACK_COM_VELOCITY, node=Node.START, min_bound=-15, max_bound=-5, phase=0, axes=Axis.Z)
 
     # Path constraint
     X_bounds = BoundsList()
@@ -273,9 +285,9 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale):
     X_bounds[1].min[:3, 0] = [-0.5, -1.2, -0.5]
     X_bounds[1].max[:3, 0] = [0.5, 0, 0.5]
     X_bounds[1].min[1:3, 1] = [-1.2, -0.5]
-    X_bounds[1].max[1:3, 1] = [1.2, 0.5]
+    X_bounds[1].max[1:3, 1] = [0, 0.5]
     X_bounds[1].min[:3, 2] = [-0.3, -1.2, -0.5]
-    X_bounds[1].max[:3, 2] = [0.3, 1.2, 0.5]
+    X_bounds[1].max[:3, 2] = [0.3, 0, 0.5]
 
     X_bounds[1].min[7:8, 0] = [0]
     X_bounds[1].max[7:8, 0] = [30]
@@ -286,26 +298,42 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale):
 
     X_bounds.add(bounds=QAndQDotBounds(biorbd_model[2]))
     X_bounds[2].min[:3, 0] = [-0.5, -0.5, -0.5]
-    X_bounds[2].max[:3, 0] = [0.5, 0.5, 0.5]
-    X_bounds[2].min[1, 1] = 1
-    X_bounds[2].max[1, 1] = 10
+    X_bounds[2].max[:3, 0] = [0.5, 5, 0.5]
+    X_bounds[2].min[1, 1] = 0
+    X_bounds[2].max[1, 1] = 9
     X_bounds[2].min[:3, 2] = [-0.3, -1.2, -0.5]
     X_bounds[2].max[:3, 2] = [0.3, 1.2, 0.5]
 
+    X_bounds[2].min[7:8, :] = [-30]
+    X_bounds[2].max[7:8, :] = [30]
+
     # Define control path constraint
+    # u_bounds = BoundsList()
+    # u_bounds.add(
+    #     bounds=Bounds(
+    #         [-1000, -1000, tau_min, tau_min, tau_min, tau_min], [1000, 1000, tau_max, tau_max, tau_max, tau_max]
+    #     )
+    # )
+    # u_bounds.add(
+    #     bounds=Bounds(
+    #         [-1000, -1000, tau_min, tau_min, tau_min, tau_min], [1000, 1000, tau_max, tau_max, tau_max, tau_max]
+    #     )
+    # )
+    # u_bounds.add(
+    #     bounds=Bounds([0, 0, 0, tau_min, tau_min, tau_min], [0, 0, 0, tau_max, tau_max, tau_max]))
     u_bounds = BoundsList()
     u_bounds.add(
         bounds=Bounds(
-            [-100000, -100000, tau_min, tau_min, tau_min, tau_min], [100000, 100000, tau_max, tau_max, tau_max, tau_max]
+            [tau_min, tau_min, tau_min, tau_min], [ tau_max, tau_max, tau_max, tau_max]
         )
     )
     u_bounds.add(
         bounds=Bounds(
-            [-100000, -100000, tau_min, tau_min, tau_min, tau_min], [100000, 100000, tau_max, tau_max, tau_max, tau_max]
+            [tau_min, tau_min, tau_min, tau_min], [tau_max, tau_max, tau_max, tau_max]
         )
     )
     u_bounds.add(
-        bounds=Bounds([0, 0, 0, tau_min, tau_min, tau_min], [0, 0, 0, tau_max, tau_max, tau_max]))
+        bounds=Bounds([ 0, tau_min, tau_min, tau_min], [0, tau_max, tau_max, tau_max]))
 
 
     # Initial guess
@@ -313,7 +341,7 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale):
     x_init.add(NoisedInitialGuess(
             [0]*12, # (nq + nqdot)
             bounds=X_bounds[0], #phase
-            noise_magnitude=0.2,
+            noise_magnitude=0.06,
             n_shooting=number_shooting_points[0],
             bound_push=0.01,
             seed=i_rand,
@@ -322,7 +350,7 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale):
     x_init.add(NoisedInitialGuess(
             [0]*12, # (nq + nqdot)
             bounds=X_bounds[1],
-            noise_magnitude=0.2,
+            noise_magnitude=0.06,
             n_shooting=number_shooting_points[1],
             bound_push=0.1,
             seed=i_rand,
@@ -341,12 +369,16 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale):
     x_init[0].init[1, :] = np.linspace(0, -1.2, 51)
     x_init[1].init[1, :] = np.linspace(-1, -0.1, 51)
 
-    x_init[0].init[7, :] = np.linspace(-20, 0, 51)
+    x_init[0].init[7, :25] = np.linspace(0, -5, 25)
+    x_init[0].init[7, 25:] = np.linspace(-5, 0, 26)
     x_init[1].init[7, :] = np.linspace(0, 10, 51)
+
+    x_init[2].init[1, :25] = np.linspace(0, 2, 25)
+    x_init[2].init[1, 25:] = np.linspace(2, 0, 26)
 
     u_init = InitialGuessList()
     u_init.add(NoisedInitialGuess(
-            [0] * 6, # ntorque
+            [0] * 4, # 6
             bounds=u_bounds[0],
             noise_magnitude=0.01,
             n_shooting=number_shooting_points[0]-1,
@@ -355,7 +387,7 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale):
         ))
 
     u_init.add(NoisedInitialGuess(
-            [0] * 6,
+            [0] * 4, # 6
             bounds=u_bounds[1],
             noise_magnitude=0.01,
             n_shooting=number_shooting_points[1]-1,
@@ -364,13 +396,16 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale):
         ))
 
     u_init.add(NoisedInitialGuess(
-            [0] * 6,
+            [0] * 4, # 6
             bounds=u_bounds[2],
             noise_magnitude=0.01,
             n_shooting=number_shooting_points[2]-1,
             bound_push=0.1,
             seed=i_rand,
         ))
+
+    Var_mapping = BiMappingList()
+    Var_mapping.add("tau", to_second=[None, None, 0,1,2,3] ,to_first =[2,3,4,5]) # mapping pour eviter d'avoir des couples sur les degres de liberte de translation
 
     ocp = OptimalControlProgram(
         biorbd_model,
@@ -383,7 +418,8 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale):
         u_bounds=u_bounds,
         objective_functions=objective_functions,
         constraints=constraints,
-        n_threads=4,
+        n_threads=31,
+        variable_mappings=Var_mapping,
     )
     return ocp
 
@@ -392,13 +428,13 @@ if __name__ == "__main__":
 
     Weight_choices = np.array([1000, 5000, 10000, 50000, 100000, 500000, 1000000, 5000000])
 
-    path_model_cheville = "/home/lim/Documents/Jules/code_initiaux_Eve/collectesaut/Cheville.bioMod"
+    path_model_cheville = "/home/mickael/Documents/Jules/propulsion/collecte/Cheville.bioMod"
 
     ygrid = np.linspace(-0.5, 0.5, 100)  # Devant-derriere
     zgrid = np.linspace(-1.2, 0, 100)  # Bas
 
-    Force_verticale = np.load("/home/lim/Documents/Jules/code_initiaux_Eve/Force_verticale_full.npy")
-    Force_horizontale = np.load("/home/lim/Documents/Jules/code_initiaux_Eve/Force_horizontale_full.npy")
+    Force_verticale = np.load("/home/mickael/Documents/Jules/propulsion/collecte/Force_verticale_full.npy")
+    Force_horizontale = np.load("/home/mickael/Documents/Jules/propulsion/collecte/Force_horizontale_full.npy")
 
     Force_verticale *= -1
     Force_horizontale *= -1
@@ -420,7 +456,7 @@ if __name__ == "__main__":
 
 
     solver = Solver.IPOPT(show_online_optim=True, show_options=dict(show_bounds=True))
-    solver.set_maximum_iterations(100000)
+    solver.set_maximum_iterations(10000)
     solver.set_tol(1e-3)
     solver.set_constr_viol_tol(1e-3)
     solver.set_linear_solver("ma57")
@@ -429,6 +465,16 @@ if __name__ == "__main__":
     toc = time() - tic
     print(f"Time to solve weight={weight}, random={i_rand}: {toc}sec")
 
+    # q = ocp.nlp[0].variable_mappings["q"].to_second.map(sol.states[0]["q"])
+    # qdot = ocp.nlp[0].variable_mappings["qdot"].to_second.map(sol.states[0]["qdot"])
+    # u = ocp.nlp[0].variable_mappings["tau"].to_second.map(sol.controls[0]["tau"])
+    # t = sol.parameters["time"]
+    # for i in range(1, len(sol.states)):
+    #     q = np.hstack((q, ocp.nlp[i].variable_mappings["q"].to_second.map(sol.states[i]["q"])))
+    #     qdot = np.hstack((qdot, ocp.nlp[i].variable_mappings["qdot"].to_second.map(sol.states[i]["qdot"])))
+    #     u = np.hstack((u, ocp.nlp[i].variable_mappings["q"].to_second.map(sol.controls[i]["tau"])))
+
+    #mapping
     q = ocp.nlp[0].variable_mappings["q"].to_second.map(sol.states[0]["q"])
     qdot = ocp.nlp[0].variable_mappings["qdot"].to_second.map(sol.states[0]["qdot"])
     u = ocp.nlp[0].variable_mappings["tau"].to_second.map(sol.controls[0]["tau"])
@@ -436,14 +482,15 @@ if __name__ == "__main__":
     for i in range(1, len(sol.states)):
         q = np.hstack((q, ocp.nlp[i].variable_mappings["q"].to_second.map(sol.states[i]["q"])))
         qdot = np.hstack((qdot, ocp.nlp[i].variable_mappings["qdot"].to_second.map(sol.states[i]["qdot"])))
-        u = np.hstack((u, ocp.nlp[i].variable_mappings["q"].to_second.map(sol.controls[i]["tau"])))
+        u = np.hstack((u, ocp.nlp[i].variable_mappings["tau"].to_second.map(sol.controls[i]["tau"])))
+
 
 #####################################################################################################################
     import bioviz
 
-    model_path = "/home/lim/Documents/Jules/code_initiaux_Eve/collectesaut/SylvainMan_Sauteur_6DoF.bioMod"
+    model_path = "/home/mickael/Documents/Jules/propulsion/collecte/SylvainMan_Sauteur_6DoF.bioMod"
 
-    path = '/home/lim/Documents/Jules/result_saut/' + 'phase012_sanssalto' + '.pkl'
+    path = '/home/mickael/Documents/Jules/propulsion/result/' + 'phase012_sanssalto_novinit_mapping10' + '.pkl'
     with open(path, 'wb') as file:
         pickle.dump(q, file)
         pickle.dump(qdot, file)
@@ -453,78 +500,4 @@ if __name__ == "__main__":
 
     b = bioviz.Viz(model_path)
     b.load_movement(q)
-    b.exec()
-
-    Q_sym = cas.MX.sym("Q_sym", biorbd.Model(model_path).nbQ(), 1)
-    custom_spring_const_post_func = custom_spring_const_post(Q_sym, lut_verticale, lut_horizontale, model_path)
-
-    Marker_pied = np.zeros((3, np.shape(q)[1]))
-    Force_toile = np.zeros((3, np.shape(q)[1]))
-    for j in range(np.shape(q)[1]):
-        Marker_pied_tempo, Force_toile_tempo = custom_spring_const_post_func(q[:, j])
-        Marker_pied[:, j] = np.reshape(Marker_pied_tempo, (3))
-        Force_toile[:, j] = np.reshape(Force_toile_tempo, (3))
-
-    plt.figure()
-    plt.plot(Force_toile[0, :], "-r", label="Force x")
-    plt.plot(Force_toile[1, :], "-g", label="Force y")
-    plt.plot(Force_toile[2, :], "-b", label="Force z")
-    plt.legend()
-
-    fig, axs = plt.subplots(2, 3)
-    axs = axs.ravel()
-    for iplt in range(biorbd.Model(model_path).nbQ()):
-        axs[iplt].plot(q[iplt, :], "-b", label="Q")
-        axs[iplt].plot(qdot[iplt, :], "-r", label="Qdot")
-        axs[iplt].plot(u[iplt, :] / 100, "-g", label="U/100")
-        axs[iplt].plot(np.array([50, 50]), np.array([-10, 10]), "--k")
-        axs[iplt].plot(np.array([100, 100]), np.array([-10, 10]), "--k")
-        axs[iplt].plot(np.array([150, 150]), np.array([-10, 10]), "--k")
-        axs[iplt].plot(np.array([200, 200]), np.array([-10, 10]), "--k")
-        axs[iplt].plot(np.array([250, 250]), np.array([-10, 10]), "--k")
-        axs[iplt].set_xlabel(biorbd.Model(model_path).nameDof()[iplt].to_string())
-        axs[iplt].legend()
-
-    fig, axs = plt.subplots(1, 2)
-    axs = axs.ravel()
-    for iplt in range(2):
-        axs[iplt].plot(q[iplt, :], "-b", label="Q")
-        axs[iplt].plot(100, q[iplt, 100], "ob", label="Q")
-        axs[iplt].plot(150, q[iplt, 150], "ob", label="Q")
-        axs[iplt].plot(250, q[iplt, 250], "ob", label="Q")
-        axs[iplt].plot(np.zeros(np.shape(q[iplt, :])), "-r")
-        axs[iplt].plot(np.array([100, 100]), np.array([-1, 1]), "--k")
-        axs[iplt].plot(np.array([150, 150]), np.array([-1, 1]), "--k")
-        axs[iplt].plot(np.array([250, 250]), np.array([-1, 1]), "--k")
-        axs[iplt].set_xlabel(biorbd.Model(model_path).nameDof()[iplt].to_string())
-        axs[iplt].set_ylim(-0.15, 0.15)
-        axs[iplt].legend()
-    plt.show()
-
-    DirertoryFlies = os.listdir("/home/lim/Documents/Jules/code_initiaux_Eve/Position_massPoints")
-    q_toile = np.zeros((15 * 3, np.shape(q)[1]))
-    for j in range(np.shape(q)[1]):
-        BestFileIndex = 0
-        BestFileNum = 1000
-        for iFile in range(len(DirertoryFlies)):
-            if "y" in DirertoryFlies[iFile]:
-                first_ = DirertoryFlies[iFile].index("_")
-                firsty = DirertoryFlies[iFile].index("y")
-                yy = float(DirertoryFlies[iFile][first_ + 1 : firsty])
-                second_ = DirertoryFlies[iFile][first_ + 1 :].index("_")
-                firstz = DirertoryFlies[iFile].index("z")
-                zz = float(DirertoryFlies[iFile][first_ + 1 + second_ + 1 : firstz])
-                if (abs(yy - Marker_pied[1, j]) + abs(zz - Marker_pied[2, j])) < BestFileNum:
-                    BestFileNum = abs(yy - Marker_pied[1, j]) + abs(zz - Marker_pied[2, j])
-                    BestFileIndex = iFile
-                    yy_final = yy
-                    zz_final = zz
-
-            data = np.load(
-                f"/home/lim/Documents/Jules/code_initiaux_Eve/Position_massPoints/{DirertoryFlies[BestFileIndex]}"
-            )
-            q_toile[:, j] = data.T.flatten()
-
-    b = bioviz.Viz("/home/lim/Documents/Jules/code_initiaux_Eve/collectesaut/jumper_sansPieds_rootPied_bioviz.bioMod")
-    b.load_movement(np.vstack((q_toile, q)))
     b.exec()
