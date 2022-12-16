@@ -11,6 +11,7 @@ import biorbd_casadi as biorbd
 import os
 import matplotlib.pyplot as plt
 from datetime import date
+import pickle
 
 
 from bioptim import (
@@ -20,7 +21,10 @@ from bioptim import (
     ConstraintFcn,
     ObjectiveFcn,
     ObjectiveList,
+    Dynamics,
     DynamicsList,
+    DynamicsFunctions,
+    DynamicsEvaluation,
     DynamicsFcn,
     BoundsList,
     QAndQDotBounds,
@@ -34,40 +38,47 @@ from bioptim import (
     BiMapping,
     Solver,
     BiorbdInterface,
+    NonLinearProgram,
+    ConfigureProblem,
 )
 
+def custom_dynamic(states, controls, parameters, nlp):
+    q = DynamicsFunctions.get(nlp.states["q"], states)
+    qdot = DynamicsFunctions.get(nlp.states["qdot"], states)
+    tau = DynamicsFunctions.get(nlp.controls["tau"], controls)
 
-def custom_spring_const(pn: PenaltyNode, lut_verticale, lut_horizontale) -> cas.MX: #ajout de la force de la toile comme etant la force appliquee a la cheville
-
-    # nq = int(pn.nlp.states.shape /2) #nombre de degres de liberté
-
-    val_contrainte = []
-
-    u_i = pn.nlp.variable_mappings["tau"].to_second.map(pn.nlp.controls["tau"].mx)
-    q_i = pn.nlp.variable_mappings['tau'].to_second.map(pn.nlp.states['q'].mx)
-
-    Markers = pn.nlp.model.markers(pn.nlp.states["q"].mx)
+    Markers = nlp.model.markers(q)
     Marker_pied = Markers[0].to_mx()
 
-    Force = cas.MX.zeros(3)
-    Force[1] = lut_horizontale(Marker_pied[1:])
-    Force[2] = lut_verticale(Marker_pied[1:])
+    Force = cas.MX.zeros(2)
+    Force[0] = lut_horizontale(Marker_pied[1:])
+    Force[1] = lut_verticale(Marker_pied[1:])
+    count = 0
+    f_contact_vec = biorbd.VecBiorbdVector()
 
-    return_value = cas.vertcat(u_i[0] - Force[1], u_i[1] - Force[2])
+    for ii in range(nlp.model.nbRigidContacts()):
+        n_f_contact = len(nlp.model.rigidContactAxisIdx(ii))
+        idx = [i + count for i in range(n_f_contact)]
+        f_contact_vec.append(Force[idx])
+        count = count + n_f_contact
 
-    val_contrainte = cas.Function("Force", [pn.nlp.states['q'].mx, pn.nlp.controls['tau'].mx], [return_value])(pn.nlp.states['q'].cx, pn.nlp.controls['tau'].cx)
+    qddot = nlp.model.ForwardDynamics(q, qdot, tau, None, f_contact_vec).to_mx()
 
-    return val_contrainte
+    return DynamicsEvaluation(dxdt=cas.vertcat(qdot, qddot), defects=None)
 
+def custom_configure(ocp: OptimalControlProgram, nlp: NonLinearProgram):
+
+    ConfigureProblem.configure_q(nlp, as_states=True, as_controls=False)
+    ConfigureProblem.configure_qdot(nlp, as_states=True, as_controls=False)
+    ConfigureProblem.configure_tau(nlp, as_states=False, as_controls=True)
+    ConfigureProblem.configure_dynamics_function(ocp, nlp, custom_dynamic, expand=False)
 
 def CoM_base_appui(pn: PenaltyNode) -> cas.MX:#centre de masse au dessus de la point de contatc avec la toile, pour rester debout, a ajouter dans contrainte
-    val_contrainte = []
-    nq = int(pn.nlp.cx / 2)
-    q_i = pn.nlp.phase_mapping["q"].to_second.map(pn.x[:nq])  # pn.x[i][:nq]
-    CoM = pn.nlp.model.CoM(q_i).to_mx()
-    q_pied_y = q_i[0]
-    CoM_proj = CoM[1]
-    val_contrainte = cas.vertcat(val_contrainte, CoM_proj - q_pied_y)
+    q = pn.nlp.states['q'].mx
+    q_pied_y = q[0]
+    CoM = pn.nlp.model.CoM(q).to_mx()
+    CoM_proj = CoM[1]  # on garde sur y
+    val_contrainte = BiorbdInterface.mx_to_cx('Com_positionY_constraints', CoM_proj - q_pied_y, pn.nlp.states['q'])
     return val_contrainte
 
 
@@ -178,8 +189,8 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
 
     # Model path
     biorbd_model = (
-        biorbd.Model(model_path_massToile),
-        biorbd.Model(model_path_massToile),
+        biorbd.Model(model_path),
+        biorbd.Model(model_path),
         biorbd.Model(model_path),
     )
 
@@ -194,23 +205,27 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
     )
 
     final_time = (
-        0.3,
-        0.3,
+        0.15,
+        0.15,
         1.5,
     )
 
-    tau_min, tau_max, tau_init = -10000, 10000, 0
+    tau_min, tau_max, tau_init =  -500, 500, 1
 
     ### --- Add objective functions --- ###
     objective_functions = ObjectiveList()
-    objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE, key="q", node=Node.END, index=1, weight=-1, phase=0, quadratic=True) #etre le plus bas a la fin de la phase 0
-    objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_COM_VELOCITY, node=Node.END, weight=-1, phase=1, quadratic=False, axes=Axis.Z) #maximiser la vitesse au moment du decollage
-    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_COM_POSITION, weight=-weight, phase=2, quadratic=False, axes=Axis.Z) #
+    objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_COM_POSITION, node=Node.END, weight=1000, phase=0, quadratic=False) #etre le plus bas a la fin de la phase 0 #### SUR LE COM
+    # objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE, key="q", node=Node.END, index=1, weight=10000, phase=0, quadratic=False) #etre le plus bas a la fin de la phase 0
+    objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_COM_VELOCITY, node=Node.END, weight=-1000, phase=1, quadratic=False, axes=Axis.Z) #maximiser la vitesse au moment du decollage
 
-    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", weight=1, phase=0, index=[2,3,4,5])
+    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_COM_POSITION, weight=-10000, phase=2, quadratic=False, axes=Axis.Z)
+
+    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", weight=1, phase=0)#, index=[2,3,4,5])
     objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", derivative=True, weight=100, phase=0)
-    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", weight=1, phase=1, index=[2,3,4,5])
+    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", weight=1, phase=1)#, index=[2,3,4,5])
     objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", derivative=True, weight=100, phase=1)
+    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", weight=1, phase=2)
+    objective_functions.add(ObjectiveFcn.Lagrange.MINIMIZE_CONTROL, key="tau", derivative=True, weight=100, phase=2)
 
     objective_functions.add(ObjectiveFcn.Mayer.MINIMIZE_STATE, key="q", node=Node.END, index=2, weight=1000, phase=2, target=np.ones((1, 1)) * 2 * np.pi * Salto1) #rotation jambe au moment du saut
 
@@ -224,21 +239,23 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
 
     # # Dynamics
     dynamics = DynamicsList()
-    dynamics.add(DynamicsFcn.TORQUE_DRIVEN)
-    dynamics.add(DynamicsFcn.TORQUE_DRIVEN)
-    dynamics.add(DynamicsFcn.TORQUE_DRIVEN)
+    dynamics.add(Dynamics(custom_configure, dynamic_function=custom_dynamic))
+    dynamics.add(Dynamics(custom_configure, dynamic_function=custom_dynamic))
+    #phase aerienne ???
+    dynamics.add(Dynamics(custom_configure, dynamic_function=custom_dynamic))
+    # dynamics.add(DynamicsFcn.TORQUE_DRIVEN)
 
     # --- Constraints --- #
     constraints = ConstraintList()
 
     # Constraint arm positivity
-    constraints.add(ConstraintFcn.TIME_CONSTRAINT, node=Node.END, min_bound=0.1, max_bound=0.4, phase=0)
-    constraints.add(ConstraintFcn.TIME_CONSTRAINT, node=Node.END, min_bound=0.1, max_bound=0.4, phase=1)
-    constraints.add(ConstraintFcn.TIME_CONSTRAINT, node=Node.END, min_bound=0.2, max_bound=3, phase=2)
+    constraints.add(ConstraintFcn.TIME_CONSTRAINT, node=Node.END, min_bound=0.08, max_bound=0.6, phase=0)
+    constraints.add(ConstraintFcn.TIME_CONSTRAINT, node=Node.END, min_bound=0.08, max_bound=0.6, phase=1)
+    constraints.add(ConstraintFcn.TIME_CONSTRAINT, node=Node.END, min_bound=0.5, max_bound=3.5, phase=2)
 
-    #constraint spring trampo
-    constraints.add(custom_spring_const, lut_verticale=lut_verticale, lut_horizontale=lut_horizontale, node=Node.ALL, min_bound=0, max_bound=0, phase=0)
-    constraints.add(custom_spring_const, lut_verticale=lut_verticale, lut_horizontale=lut_horizontale, node=Node.ALL, min_bound=0, max_bound=0, phase=1)
+    # initial velocity
+    # constraints.add(ConstraintFcn.TRACK_COM_VELOCITY, node=Node.START, min_bound=-15, max_bound=-10, phase=0, axes=Axis.Z)
+
 
     #contraintes sur le couple min
     # constraints.add(
@@ -263,14 +280,14 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
     X_bounds[0].min[:1, 1:] = [-0.3]
     X_bounds[0].max[:1, 1:] = [0.3]
 
-    X_bounds[0].min[:, 0] = [-0.3, 0, -0.4323, 1.4415, -1.5564, 1.02, -10, -12, -1, -1, -1, -1]
-    X_bounds[0].max[:, 0] = [0.3, 0, -0.4323, 1.4415, -1.5564, 1.02, 10, -12, 1, 1, 1, 1]
+    X_bounds[0].min[:, 0] = [-0.3, 0, -0.4323, 1.4415, -1.5564, 1.02, -10, -30, -1, -1, -1, -1]
+    X_bounds[0].max[:, 0] = [0.3, 0, -0.4323, 1.4415, -1.5564, 1.02, 10, 0, 1, 1, 1, 1]
     X_bounds[0].min[1:3, 1] = [-1.2, -0.5]
     X_bounds[0].max[1:3, 1] = [0, 0.5]
     X_bounds[0].min[1:3, 2] = [-1.2, -0.5]
     X_bounds[0].max[1:3, 2] = [0, 0.5]
 
-    X_bounds[0].min[7:8, 1] = [-15]
+    X_bounds[0].min[7:8, 1] = [-30]
     X_bounds[0].max[7:8, 1] = [0]
     X_bounds[0].min[7:8, 2] = [0]
     X_bounds[0].max[7:8, 2] = [0]
@@ -283,27 +300,37 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
     X_bounds[1].max[:3, 0] = [0.5, 0, 0.5]
     X_bounds[1].min[1:3, 1] = [-1.2, -0.5]
     X_bounds[1].max[1:3, 1] = [0, 0.5]
-    X_bounds[1].min[:3, 2] = [-0.5, -0.5, -0.5]  # 0.05
-    X_bounds[1].max[:3, 2] = [0.5, 0.5, 0.5]  # 0.05
+    X_bounds[1].min[:3, 2] = [-0.3, -1.2, -0.5]
+    X_bounds[1].max[:3, 2] = [0.3, 0, 0.5]
+
+    X_bounds[1].min[7:8, 0] = [0]
+    X_bounds[1].max[7:8, 0] = [30]
+    X_bounds[1].min[7:8, 1] = [0]
+    X_bounds[1].max[7:8, 1] = [30]
+    X_bounds[1].min[7:8, 2] = [0]
+    X_bounds[1].max[7:8, 2] = [30]
 
     X_bounds.add(bounds=QAndQDotBounds(biorbd_model[2]))
     X_bounds[2].min[:3, 0] = [-0.5, -0.5, -0.5]
     X_bounds[2].max[:3, 0] = [0.5, 0.5, 0.5]
     X_bounds[2].min[1, 1] = 0
-    X_bounds[2].max[1, 1] = 10
+    X_bounds[2].max[1, 1] = 5
     X_bounds[2].min[:3, 2] = [-0.5, -0.5, Salto1 * 2 * np.pi - 0.5]  # 0.05
     X_bounds[2].max[:3, 2] = [0.5, 0.5, Salto1 * 2 * np.pi + 0.5]  # 0.05
+
+    X_bounds[2].min[7:8, :] = [-30]
+    X_bounds[2].max[7:8, :] = [30]
 
     # Define control path constraint
     u_bounds = BoundsList()
     u_bounds.add(
         bounds=Bounds(
-            [-100000, -100000, tau_min, tau_min, tau_min, tau_min], [100000, 100000, tau_max, tau_max, tau_max, tau_max]
+            [-1000, -1000, tau_min, tau_min, tau_min, tau_min], [1000, 1000, tau_max, tau_max, tau_max, tau_max]
         )
     )
     u_bounds.add(
         bounds=Bounds(
-            [-100000, -100000, tau_min, tau_min, tau_min, tau_min], [100000, 100000, tau_max, tau_max, tau_max, tau_max]
+            [-1000, -1000, tau_min, tau_min, tau_min, tau_min], [1000, 1000, tau_max, tau_max, tau_max, tau_max]
         )
     )
     u_bounds.add(
@@ -340,10 +367,11 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
         )
     )
 
-    x_init[0].init[1, :] = np.linspace(-0.1, -1.0, 51)
-    x_init[1].init[1, :] = np.linspace(-1.0, -0.1, 51)
-    #interpol lineaire sur qjambe_rotx
-    x_init[2].init[2, :] = (np.linspace(0, (2*np.pi), 51))
+    x_init[0].init[1, :] = np.linspace(0, -1.2, 51)
+    x_init[1].init[1, :] = np.linspace(-1, -0.1, 51)
+
+    x_init[0].init[7, :] = np.linspace(-20, 0, 51)
+    x_init[1].init[7, :] = np.linspace(0, 10, 51)
 
     u_init = InitialGuessList()
     u_init.add(NoisedInitialGuess(
@@ -391,12 +419,6 @@ def prepare_ocp_back_back(path_model_cheville, lut_verticale, lut_horizontale, w
 
 if __name__ == "__main__":
 
-    Date = date.today()
-    Date = Date.strftime("%d-%m-%y")
-    f = open(f"Historique_{Date}.txt", "w+")
-    f.write(" Debut ici \n\n\n")
-    f.close()
-
     Salto_1 = np.array([1])
     Salto_2 = np.array([1])
 
@@ -421,45 +443,48 @@ if __name__ == "__main__":
 
     # **************** Masse de la toile au pieds du modele ********************************************************
     # initialisation du parametre temps #######
-    for i_salto in range(len(Salto_1)):
-        Salto1 = Salto_1[i_salto]
-        Salto2 = Salto_2[i_salto]
+    Salto1 = 1
+    Salto2 = 1
 
-        weight = 10000
-        i_rand = 10
+    weight = 1000
+    i_rand = 10
 
-        # ----------------------------------------------- Sauteur_8 --------------------------------------------------------
-        f = open(f"Historique_{Date}.txt", "a+")
-        f.write(f"\n\n\nSalto1{Salto1}_Salto2{Salto2}_DoF6_weight{weight}_random{i_rand} : ")
-        f.close()
+    # ----------------------------------------------- Sauteur_8 --------------------------------------------------------
+    tic = time()
+    ocp = prepare_ocp_back_back(path_model_cheville=path_model_cheville,lut_verticale=lut_verticale,lut_horizontale=lut_horizontale,weight=weight,Salto1=Salto1,Salto2=Salto2)
 
-        tic = time()
-        ocp = prepare_ocp_back_back(path_model_cheville=path_model_cheville,lut_verticale=lut_verticale,lut_horizontale=lut_horizontale,weight=weight,Salto1=Salto1,Salto2=Salto2,)
 
-#
-        solver = Solver.IPOPT(show_online_optim=True, show_options=dict(show_bounds=True))
-        solver.set_maximum_iterations(100000)
-        solver.set_tol(1e-3)
-        solver.set_constr_viol_tol(1e-3)
-        solver.set_linear_solver("ma57")
-        sol = ocp.solve(solver)
+    solver = Solver.IPOPT(show_online_optim=True, show_options=dict(show_bounds=True))
+    solver.set_maximum_iterations(100000)
+    solver.set_tol(1e-3)
+    solver.set_constr_viol_tol(1e-3)
+    solver.set_linear_solver("ma57")
+    sol = ocp.solve(solver)
 
-        toc = time() - tic
-        print(f"Time to solve weight={weight}, random={i_rand}: {toc}sec")
+    toc = time() - tic
+    print(f"Time to solve weight={weight}, random={i_rand}: {toc}sec")
 
-        q = ocp.nlp[0].variable_mappings["q"].to_second.map(sol.states[0]["q"])
-        qdot = ocp.nlp[0].variable_mappings["qdot"].to_second.map(sol.states[0]["qdot"])
-        u = ocp.nlp[0].variable_mappings["tau"].to_second.map(sol.controls[0]["tau"])
-        t = sol.parameters["time"]
-        for i in range(1, len(sol.states)):
-            q = np.hstack((q, ocp.nlp[i].variable_mappings["q"].to_second.map(sol.states[i]["q"])))
-            qdot = np.hstack((qdot, ocp.nlp[i].variable_mappings["qdot"].to_second.map(sol.states[i]["qdot"])))
-            u = np.hstack((u, ocp.nlp[i].variable_mappings["q"].to_second.map(sol.controls[i]["tau"])))
+    q = ocp.nlp[0].variable_mappings["q"].to_second.map(sol.states[0]["q"])
+    qdot = ocp.nlp[0].variable_mappings["qdot"].to_second.map(sol.states[0]["qdot"])
+    u = ocp.nlp[0].variable_mappings["tau"].to_second.map(sol.controls[0]["tau"])
+    t = sol.parameters["time"]
+    for i in range(1, len(sol.states)):
+        q = np.hstack((q, ocp.nlp[i].variable_mappings["q"].to_second.map(sol.states[i]["q"])))
+        qdot = np.hstack((qdot, ocp.nlp[i].variable_mappings["qdot"].to_second.map(sol.states[i]["qdot"])))
+        u = np.hstack((u, ocp.nlp[i].variable_mappings["q"].to_second.map(sol.controls[i]["tau"])))
 
 #####################################################################################################################
     import bioviz
 
     model_path = "/home/lim/Documents/Jules/code_initiaux_Eve/collectesaut/SylvainMan_Sauteur_6DoF.bioMod"
+
+    path = '/home/lim/Documents/Jules/result_saut/' + 'phase012_sauteur3' + '.pkl'
+    with open(path, 'wb') as file:
+        pickle.dump(q, file)
+        pickle.dump(qdot, file)
+        pickle.dump(u, file)
+        pickle.dump(t, file)
+
 
     b = bioviz.Viz(model_path)
     b.load_movement(q)
