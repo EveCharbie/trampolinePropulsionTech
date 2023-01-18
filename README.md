@@ -16,3 +16,7 @@ le dossier comprend aussi :
 - des tests sur forward dynamics, pour la différence entre F_ext et F_contact
 - un modele de cube tres simplifier sur 1 ou 2 phase
 - un code pour afficher les videos bioviz et les valeurs des look up tables
+
+
+
+Dernier code : Trampo_sauteur_6deg _3phases_sanssalto.py -> avec le bon mapping, mais ne converge pas
